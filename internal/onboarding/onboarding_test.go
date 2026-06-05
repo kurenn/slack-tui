@@ -1,0 +1,160 @@
+package onboarding
+
+import (
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+func sized() Model { return WithSize(New(), 100, 30) }
+
+func update(m Model, msg tea.Msg) Model { next, _ := m.Update(msg); return next }
+
+func TestBootFastForwardThenAuth(t *testing.T) {
+	m := sized()
+	m = Key(m, " ") // any key fast-forwards boot
+	if !m.boot.done {
+		t.Fatal("a key during boot should fast-forward it")
+	}
+	m = update(m, bootAdvanceMsg{})
+	if m.phase != phaseAuth {
+		t.Errorf("phase = %q, want auth", m.phase)
+	}
+}
+
+func TestAuthGuestToIdentity(t *testing.T) {
+	m := sized()
+	m.phase = phaseAuth
+	m = Key(m, "4") // continue as guest
+	if m.phase != phaseIdentity {
+		t.Errorf("guest auth → phase %q, want identity", m.phase)
+	}
+	if m.provider != "guest" {
+		t.Errorf("provider = %q, want guest", m.provider)
+	}
+}
+
+func TestTokenFlow(t *testing.T) {
+	m := sized()
+	m.phase = phaseAuth
+	m = Key(m, "3") // paste a token
+	if m.phase != phaseToken {
+		t.Fatalf("phase = %q, want token", m.phase)
+	}
+	m = Key(m, "ent") // too short
+	m = Key(m, "enter")
+	if m.phase != phaseToken {
+		t.Error("token under 4 chars should not advance")
+	}
+	m = Key(m, "xoxp-123")
+	m = Key(m, "enter")
+	if m.phase != phaseIdentity {
+		t.Errorf("valid token → phase %q, want identity", m.phase)
+	}
+}
+
+func TestIdentityToWizard(t *testing.T) {
+	m := sized()
+	m.phase = phaseIdentity
+	m.handle.Focus()
+	m = Key(m, "enter") // empty handle: no advance
+	if m.phase != phaseIdentity {
+		t.Error("empty handle should not advance")
+	}
+	m = Key(m, "devon")
+	m = Key(m, "enter")
+	if m.phase != phaseWizard || m.step() != "theme" {
+		t.Errorf("phase/step = %q/%q, want wizard/theme", m.phase, m.step())
+	}
+}
+
+func TestWizardThemePreview(t *testing.T) {
+	m := sized()
+	m.phase = phaseWizard
+	m = m.syncOpt()
+	start := m.themeName
+	m = Key(m, "j")
+	if m.themeName == start {
+		t.Errorf("j should preview a different theme, still %q", m.themeName)
+	}
+}
+
+func TestWizardKeyboardGate(t *testing.T) {
+	m := sized()
+	m.phase = phaseWizard
+	m.stepIndex = 3 // keyboard
+	if m.step() != "keyboard" {
+		t.Fatalf("step = %q, want keyboard", m.step())
+	}
+	m = Key(m, "enter") // should NOT advance — drills incomplete
+	if m.stepIndex != 3 {
+		t.Errorf("keyboard step advanced before drills complete (stepIndex=%d)", m.stepIndex)
+	}
+}
+
+func TestTrainerCompletesAllDrills(t *testing.T) {
+	m := sized()
+	m.phase = phaseWizard
+	m.stepIndex = 3
+
+	// drill 0: navigate (down then up)
+	m = Key(m, "j")
+	m = Key(m, "k")
+	if !m.trainer.done[0] {
+		t.Fatal("nav drill not marked done")
+	}
+	m = update(m, advanceDrillMsg{})
+
+	// drill 1: compose
+	m = Key(m, "i")
+	m = Key(m, "hi")
+	m = Key(m, "enter")
+	if !m.trainer.done[1] {
+		t.Fatal("compose drill not marked done")
+	}
+	m = update(m, advanceDrillMsg{})
+
+	// drill 2: threads
+	m = Key(m, "t")
+	if !m.trainer.done[2] {
+		t.Fatal("thread drill not marked done")
+	}
+	m = update(m, advanceDrillMsg{})
+
+	// drill 3: palette
+	m = Key(m, "ctrl+k")
+	m = Key(m, "esc")
+	if !m.trainer.done[3] {
+		t.Fatal("palette drill not marked done")
+	}
+	m = update(m, advanceDrillMsg{})
+
+	if !m.kbDone {
+		t.Error("kbDone should be true after all drills")
+	}
+	m = Key(m, "enter") // now allowed to continue
+	if m.stepIndex != 4 {
+		t.Errorf("after kbDone, enter should advance to status (stepIndex=%d)", m.stepIndex)
+	}
+}
+
+func TestFinishEmitsPrefs(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // keep config.Save off the real config dir
+	m := Goto(WithSize(New(), 100, 30), phaseLaunch)
+	m.themeName = "midnight"
+	m.accent = "purple"
+	m.density = "compact"
+	m.status = "away"
+	_, cmd := m.finish()
+	if cmd == nil {
+		t.Fatal("finish should return a command")
+	}
+	msg := cmd()
+	fin, ok := msg.(FinishedMsg)
+	if !ok {
+		t.Fatalf("finish msg type = %T, want FinishedMsg", msg)
+	}
+	if fin.Prefs.Theme != "midnight" || fin.Prefs.Handle != "devon" || !fin.Prefs.Onboarded {
+		t.Errorf("prefs = %+v", fin.Prefs)
+	}
+}

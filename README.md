@@ -43,6 +43,6 @@ internal/
 2. ✅ Modal keyboard engine (NORMAL/INSERT, focus routing)
 3. ✅ Threads + composer send + scroll-into-view
 4. ✅ Command palette (`Ctrl-K`)
-5. ⬜ Onboarding (boot → auth → wizard → keyboard trainer → launch)
-6. ⬜ Prefs handoff + live theme/accent/density switching
+5. ✅ Onboarding (boot → auth → wizard → keyboard trainer → launch)
+6. ✅ Prefs hand-off (onboarding writes `prefs.json`, app adopts theme/accent/density/status/handle)
 7. ⬜ Real Slack data source (Web API reads + Socket Mode/poll for live)

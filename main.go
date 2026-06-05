@@ -11,6 +11,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/abrahamkuri/slack-tui/internal/app"
+	"github.com/abrahamkuri/slack-tui/internal/onboarding"
+	"github.com/abrahamkuri/slack-tui/internal/root"
 )
 
 func main() {
@@ -29,8 +31,17 @@ func main() {
 			return
 		}
 	}
+	// `slack-tui --dump-ob 90x28 wizard:theme` renders an onboarding phase.
+	if len(os.Args) >= 4 && os.Args[1] == "--dump-ob" {
+		var w, h int
+		if _, err := fmt.Sscanf(os.Args[2], "%dx%d", &w, &h); err == nil {
+			m := onboarding.Goto(onboarding.New(), os.Args[3])
+			fmt.Println(onboarding.Dump(m, w, h))
+			return
+		}
+	}
 
-	p := tea.NewProgram(app.New(), tea.WithAltScreen())
+	p := tea.NewProgram(root.New(), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "slack-tui:", err)
 		os.Exit(1)

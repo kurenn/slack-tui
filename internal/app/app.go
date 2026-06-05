@@ -65,6 +65,13 @@ func New() Model {
 	prefs, _ := config.Load()
 	ws := data.Mock()
 
+	// Onboarding hand-off: adopt the chosen handle as the current user's identity.
+	if prefs.Handle != "" {
+		me := ws.Users[ws.MeID]
+		me.Name, me.Handle = prefs.Handle, prefs.Handle
+		ws.Users[ws.MeID] = me
+	}
+
 	messages := make(map[string][]data.Message, len(ws.Messages))
 	for k, v := range ws.Messages {
 		messages[k] = append([]data.Message(nil), v...)

@@ -1,0 +1,61 @@
+# slack-tui — Slack app manifest
+#
+# Setup:
+#   1. https://api.slack.com/apps → Create New App → From an app manifest
+#   2. Pick your workspace → paste this YAML → Next → Create.
+#   3. Basic Information → App-Level Tokens → Generate Token and Scopes:
+#        name "socket", scope connections:write → Generate → copy the xapp-… token.
+#   4. Install App → Install to Workspace → Allow.
+#   5. OAuth & Permissions → copy:
+#        User OAuth Token  → xoxp-…   (reads + sends as you)
+#        Bot User OAuth Token → xoxb-…  (Socket Mode event context)
+#   6. In Slack, `/invite @slack-tui` in any channel you want live (Socket Mode
+#      only streams channels/DMs the app is a member of; personal DMs are polled).
+#
+# (redirect_urls for the browser OAuth flow are added later — testing uses the
+#  copied tokens above, no redirect needed.)
+
+display_information:
+  name: slack-tui
+  description: A keyboard-first terminal Slack client
+  background_color: "#0d1117"
+
+features:
+  bot_user:
+    display_name: slack-tui
+    always_online: false
+
+oauth_config:
+  scopes:
+    user:
+      - channels:history
+      - channels:read
+      - groups:history
+      - groups:read
+      - im:history
+      - im:read
+      - mpim:history
+      - mpim:read
+      - users:read
+      - chat:write
+      - reactions:read
+    bot:
+      - channels:history
+      - channels:read
+      - groups:history
+      - im:history
+      - mpim:history
+      - users:read
+
+settings:
+  event_subscriptions:
+    bot_events:
+      - message.channels
+      - message.groups
+      - message.im
+      - message.mpim
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false

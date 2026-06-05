@@ -60,11 +60,11 @@ func SelectableIndexes(items []SideItem) []int {
 // SidebarBody renders the sidebar list to a body string. selIndex is a flat-list
 // index; the cursor highlight only shows when focused.
 func SidebarBody(p theme.Palette, ws *data.Workspace, items []SideItem, activeID string, selIndex int, focused bool, innerW int) string {
-	header := lipgloss.NewStyle().Foreground(p.Dim2).Background(p.Panel)
-	var lines []string
+	header := lipgloss.NewStyle().Foreground(p.Dim2)
+	lines := []string{""} // top breathing room
 	for i, it := range items {
 		if it.Header {
-			lines = append(lines, header.Render(it.Label))
+			lines = append(lines, " "+header.Render(it.Label))
 			continue
 		}
 		lines = append(lines, sideRow(p, ws, it.Conv, i == selIndex && focused, it.Conv.ID == activeID, innerW))
@@ -72,13 +72,15 @@ func SidebarBody(p theme.Palette, ws *data.Workspace, items []SideItem, activeID
 	return strings.Join(lines, "\n")
 }
 
+// sideRow renders one conversation row. The active/cursor highlight is inset one
+// column from each pane edge (a contained block, not a full-bleed band); the
+// cursor adds an accent bar in the left margin.
 func sideRow(p theme.Palette, ws *data.Workspace, c data.Conversation, cursor, active bool, w int) string {
 	unread := c.Unread > 0
 	nameColor := p.Dim
 	if unread || active || cursor {
 		nameColor = p.Fg
 	}
-
 	sigilColor := p.Dim2
 	if unread || active {
 		sigilColor = p.Dim
@@ -99,20 +101,20 @@ func sideRow(p theme.Palette, ws *data.Workspace, c data.Conversation, cursor, a
 		badge = lipgloss.NewStyle().Foreground(p.Fg).Background(p.BadgeBg).Render(fmt.Sprintf(" %d ", c.Unread))
 	}
 
-	// 2-col left margin holds the accent cursor bar when this row is the cursor.
-	margin := "  "
-	if cursor {
-		margin = lipgloss.NewStyle().Foreground(p.Accent).Render("▌") + " "
+	region := w - 2 // 1-col margin on each side
+	lead := " " + sigil + " " + name
+	gap := region - lipgloss.Width(lead) - lipgloss.Width(badge) - 1
+	if gap < 1 {
+		gap = 1
 	}
-	left := margin + sigil + " " + name
-	gap := w - lipgloss.Width(left) - lipgloss.Width(badge)
-	if gap < 0 {
-		gap = 0
-	}
-	row := left + strings.Repeat(" ", gap) + badge
+	content := lead + strings.Repeat(" ", gap) + badge + " "
 
-	if cursor || active {
-		return padLine(row, w, p.SelBg)
+	leftMargin, rightMargin := " ", " "
+	if cursor {
+		leftMargin = lipgloss.NewStyle().Foreground(p.Accent).Render("▌")
 	}
-	return row
+	if active || cursor {
+		content = lipgloss.NewStyle().Width(region).Background(p.SelBg).Render(content)
+	}
+	return leftMargin + content + rightMargin
 }

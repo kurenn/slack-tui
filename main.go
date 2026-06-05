@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/abrahamkuri/slack-tui/internal/app"
 	"github.com/abrahamkuri/slack-tui/internal/onboarding"
@@ -16,6 +18,12 @@ import (
 )
 
 func main() {
+	// FORCE_COLOR makes --dump emit truecolor even without a TTY (for piping a
+	// colored frame into a renderer like `freeze`).
+	if os.Getenv("FORCE_COLOR") != "" {
+		lipgloss.SetColorProfile(termenv.TrueColor)
+	}
+
 	// Hidden dev flag: `slack-tui --dump 100x30` renders one frame to stdout and
 	// exits — used for headless verification and screenshots.
 	if len(os.Args) >= 3 && os.Args[1] == "--dump" {

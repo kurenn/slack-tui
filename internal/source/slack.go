@@ -3,6 +3,7 @@ package source
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -53,19 +54,25 @@ func (s *Slack) Load() (*data.Workspace, error) {
 	me := users[s.meID]
 	me.Name, me.Handle = "you", users[s.meID].Handle
 
+	// Only real channels (the user is a member of) and 1:1 DMs. Group DMs
+	// (mpim / mpdm-*) are excluded — they flood and clutter the list.
 	var channels, dms []data.Conversation
 	cursor := ""
 	for {
 		convs, next, err := s.api.GetConversations(&slack.GetConversationsParameters{
-			Types: []string{"public_channel", "private_channel", "im", "mpim"}, ExcludeArchived: true, Limit: 200, Cursor: cursor,
+			Types: []string{"public_channel", "private_channel", "im"}, ExcludeArchived: true, Limit: 200, Cursor: cursor,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("conversations: %w", err)
 		}
 		for _, c := range convs {
-			if c.IsIM {
+			switch {
+			case c.IsIM:
+				if c.User == "" || c.IsUserDeleted {
+					continue
+				}
 				dms = append(dms, data.Conversation{ID: c.ID, Type: "dm", Name: nameOf(users, c.User), UserID: c.User})
-			} else if c.IsMember || c.IsMpIM {
+			case c.IsMember && !c.IsMpIM:
 				channels = append(channels, data.Conversation{ID: c.ID, Type: "channel", Name: c.Name, Topic: c.Topic.Value})
 			}
 		}
@@ -74,6 +81,8 @@ func (s *Slack) Load() (*data.Workspace, error) {
 		}
 		cursor = next
 	}
+	sort.Slice(channels, func(i, j int) bool { return channels[i].Name < channels[j].Name })
+	sort.Slice(dms, func(i, j int) bool { return dms[i].Name < dms[j].Name })
 
 	ws := &data.Workspace{
 		Name: auth.Team, Handle: slugify(auth.Team), MeID: s.meID,

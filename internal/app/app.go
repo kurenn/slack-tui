@@ -309,6 +309,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.meta[d.ID] = mm
 		}
 		return m, nil
+	case presenceMsg:
+		if msg.err != nil {
+			m.loadErr = msg.err
+		}
+		return m, nil
 	case historyMsg:
 		if msg.err == nil {
 			m.applyHistory(msg.convID, msg.msgs)

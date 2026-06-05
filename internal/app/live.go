@@ -22,10 +22,13 @@ func dmPollTick() tea.Cmd {
 	return tea.Tick(dmPollInterval, func(time.Time) tea.Msg { return dmPollMsg{} })
 }
 
-// setPresenceCmd pushes the current presence (online/away/dnd) to the backend.
+type presenceMsg struct{ err error }
+
+// setPresenceCmd pushes the current presence (online/away/dnd) to the backend,
+// surfacing any error (e.g. a missing users:write scope).
 func (m Model) setPresenceCmd() tea.Cmd {
 	src, status := m.src, m.myStatus
-	return func() tea.Msg { _ = src.SetPresence(status); return nil }
+	return func() tea.Msg { return presenceMsg{src.SetPresence(status)} }
 }
 
 // markReadCmd tells the backend the conversation is read up to its latest message

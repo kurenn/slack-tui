@@ -39,6 +39,8 @@ oauth_config:
       - users:read
       - chat:write
       - reactions:read
+      - users:write           # set presence (active/away)
+      - dnd:write             # Do Not Disturb (snooze)
     bot:
       - channels:history
       - channels:read

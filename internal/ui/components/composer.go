@@ -16,15 +16,15 @@ func Composer(p theme.Palette, prompt, inputView string, insert bool, width int)
 	if insert {
 		borderColor = p.Accent
 	}
-	bs := lipgloss.NewStyle().Foreground(borderColor).Background(p.Panel)
+	bs := lipgloss.NewStyle().Foreground(borderColor)
 	innerW := width - 2
 
-	promptStyled := lipgloss.NewStyle().Foreground(p.Accent).Background(p.Panel).Bold(true).Render(prompt)
+	promptStyled := lipgloss.NewStyle().Foreground(p.Accent).Bold(true).Render(prompt)
 	hint := "i to write"
 	if insert {
 		hint = "↵ send · esc normal"
 	}
-	hintStyled := lipgloss.NewStyle().Foreground(p.Dim2).Background(p.Panel).Render(hint)
+	hintStyled := lipgloss.NewStyle().Foreground(p.Dim2).Render(hint)
 
 	left := " " + promptStyled + " " + inputView
 	right := hintStyled + " "
@@ -38,9 +38,7 @@ func Composer(p theme.Palette, prompt, inputView string, insert bool, width int)
 		left = ansi.Truncate(left, innerW-lipgloss.Width(right), "")
 		gap = 0
 	}
-	row := bs.Render("│") +
-		lipgloss.NewStyle().Background(p.Panel).Render(left+strings.Repeat(" ", gap)+right) +
-		bs.Render("│")
+	row := bs.Render("│") + left + strings.Repeat(" ", gap) + right + bs.Render("│")
 
 	top := bs.Render("┌" + strings.Repeat("─", innerW) + "┐")
 	bottom := bs.Render("└" + strings.Repeat("─", innerW) + "┘")

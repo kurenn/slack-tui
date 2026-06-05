@@ -50,8 +50,3 @@ func Wrap(s string, width int) []string {
 	}
 	return out
 }
-
-// padLine truncates/pads a styled line to exactly width, applying bg behind it.
-func padLine(s string, width int, bg lipgloss.Color) string {
-	return lipgloss.NewStyle().Width(width).Background(bg).Render(ansi.Truncate(s, width, ""))
-}

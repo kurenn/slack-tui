@@ -17,7 +17,7 @@ func ThreadScroll(p theme.Palette, ws *data.Workspace, root data.Message, selInd
 	// the main list, not the rail).
 	rootMsg := root
 	rootMsg.Replies = nil
-	lines = append(lines, messageLines(p, ws, rootMsg, innerW, false, false)...)
+	lines = append(lines, messageLines(p, ws, rootMsg, innerW, false, false, false)...)
 
 	replies := root.Replies
 	sep := fmt.Sprintf(" %d %s ", len(replies), plural(len(replies), "reply", "replies"))
@@ -31,7 +31,7 @@ func ThreadScroll(p theme.Palette, ws *data.Workspace, root data.Message, selInd
 	for i, r := range replies {
 		starts = append(starts, len(lines))
 		msg := data.Message{ID: r.ID, UserID: r.UserID, Time: r.Time, Text: r.Text}
-		lines = append(lines, messageLines(p, ws, msg, innerW, i == selIndex && focused, false)...)
+		lines = append(lines, messageLines(p, ws, msg, innerW, i == selIndex && focused, false, false)...)
 	}
 	starts = append(starts, len(lines))
 	return lines, starts

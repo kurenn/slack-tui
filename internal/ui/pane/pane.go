@@ -39,24 +39,28 @@ func Render(p theme.Palette, o Options) string {
 		borderColor = p.Accent
 		titleColor = p.Accent
 	}
-	bs := lipgloss.NewStyle().Foreground(borderColor).Background(p.Panel)
-	ts := lipgloss.NewStyle().Foreground(titleColor).Background(p.Panel).Bold(o.Focused)
-	rs := lipgloss.NewStyle().Foreground(p.Dim2).Background(p.Panel)
+	// Transparent interior: the pane only draws borders/title; body lines paint
+	// their own background (clean uniform terminal bg for normal content, and
+	// continuous highlight bands via theme.FillBg). Painting a panel bg here
+	// would be clipped by lipgloss resets in styled content and look ragged.
+	bs := lipgloss.NewStyle().Foreground(borderColor)
+	ts := lipgloss.NewStyle().Foreground(titleColor).Bold(o.Focused)
+	rs := lipgloss.NewStyle().Foreground(p.Dim2)
 
 	var b strings.Builder
 	b.WriteString(topRule(bs, ts, rs, o.Title, o.Right, innerW))
 	b.WriteByte('\n')
 
 	lines := strings.Split(o.Body, "\n")
-	fill := lipgloss.NewStyle().Width(innerW).Background(p.Panel)
 	for i := 0; i < bodyH; i++ {
 		var content string
 		if i < len(lines) {
 			content = ansi.Truncate(lines[i], innerW, "")
 		}
-		b.WriteString(bs.Render("│"))
-		b.WriteString(fill.Render(content))
-		b.WriteString(bs.Render("│"))
+		if w := lipgloss.Width(content); w < innerW {
+			content += strings.Repeat(" ", innerW-w)
+		}
+		b.WriteString(bs.Render("│") + content + bs.Render("│"))
 		b.WriteByte('\n')
 	}
 

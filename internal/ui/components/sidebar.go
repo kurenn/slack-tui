@@ -126,7 +126,7 @@ func sideRow(p theme.Palette, ws *data.Workspace, c data.Conversation, cursor, a
 		leftMargin = lipgloss.NewStyle().Foreground(p.Accent).Render("•")
 	}
 	if active || cursor {
-		content = lipgloss.NewStyle().Width(region).Background(p.SelBg).Render(content)
+		content = theme.FillBg(content, region, p.SelBg)
 	}
 	return leftMargin + content + rightMargin
 }

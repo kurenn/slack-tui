@@ -18,12 +18,20 @@ const timeGutter = 6 // "09:21 "
 // highlight only shows when focused.
 func MessagesBody(p theme.Palette, ws *data.Workspace, msgs []data.Message, selIndex int, focused bool, density theme.Density, innerW int) (lines []string, starts []int) {
 	lines = append(lines, dayBreak(p, innerW), "")
+	gap := density.MsgGap() + 1 // blank lines between author groups
+	prevUser := ""
 	for i, msg := range msgs {
-		starts = append(starts, len(lines))
-		lines = append(lines, messageLines(p, ws, msg, innerW, i == selIndex && focused, msg.MentionsMe)...)
-		for g := 0; g < density.MsgGap(); g++ {
-			lines = append(lines, "")
+		// Group consecutive messages from the same author: only the first shows
+		// the name/time header; groups are separated by a blank line.
+		grouped := i > 0 && msg.UserID == prevUser
+		if i > 0 && !grouped {
+			for g := 0; g < gap; g++ {
+				lines = append(lines, "")
+			}
 		}
+		starts = append(starts, len(lines))
+		lines = append(lines, messageLines(p, ws, msg, innerW, i == selIndex && focused, msg.MentionsMe, grouped)...)
+		prevUser = msg.UserID
 	}
 	starts = append(starts, len(lines))
 	return lines, starts
@@ -39,7 +47,7 @@ func dayBreak(p theme.Palette, w int) string {
 	return rule + lipgloss.NewStyle().Foreground(p.Dim2).Render(label) + rule
 }
 
-func messageLines(p theme.Palette, ws *data.Workspace, msg data.Message, w int, selected, mention bool) []string {
+func messageLines(p theme.Palette, ws *data.Workspace, msg data.Message, w int, selected, mention, grouped bool) []string {
 	u, ok := ws.Users[msg.UserID]
 	if !ok {
 		u = data.User{Name: msg.UserID, Color: "fg"}
@@ -49,11 +57,12 @@ func messageLines(p theme.Palette, ws *data.Workspace, msg data.Message, w int, 
 		bodyW = 10
 	}
 
-	tm := lipgloss.NewStyle().Foreground(p.Dim2).Width(timeGutter).Render(msg.Time)
-	name := lipgloss.NewStyle().Foreground(p.Token(u.Color)).Bold(true).Render(u.Name)
-
 	var out []string
-	out = append(out, tm+name)
+	if !grouped { // grouped follow-ups omit the repeated name/time header
+		tm := lipgloss.NewStyle().Foreground(p.Dim2).Width(timeGutter).Render(msg.Time)
+		name := lipgloss.NewStyle().Foreground(p.Token(u.Color)).Bold(true).Render(u.Name)
+		out = append(out, tm+name)
+	}
 	for _, ln := range strings.Split(markup.Render(p, msg.Text), "\n") {
 		for _, wrapped := range Wrap(ln, bodyW) {
 			out = append(out, strings.Repeat(" ", timeGutter)+wrapped)
@@ -62,9 +71,9 @@ func messageLines(p theme.Palette, ws *data.Workspace, msg data.Message, w int, 
 	if len(msg.Reactions) > 0 {
 		var rs []string
 		for _, r := range msg.Reactions {
-			rs = append(rs, lipgloss.NewStyle().Background(p.SelBg).Render(fmt.Sprintf(" %s %d ", r.Emoji, r.Count)))
+			rs = append(rs, r.Emoji+" "+lipgloss.NewStyle().Foreground(p.Dim).Render(fmt.Sprintf("%d", r.Count)))
 		}
-		out = append(out, strings.Repeat(" ", timeGutter)+strings.Join(rs, " "))
+		out = append(out, strings.Repeat(" ", timeGutter)+strings.Join(rs, "   "))
 	}
 	if len(msg.Replies) > 0 {
 		who := replyWho(ws, msg.Replies)
@@ -79,12 +88,12 @@ func messageLines(p theme.Palette, ws *data.Workspace, msg data.Message, w int, 
 	case selected:
 		bar := lipgloss.NewStyle().Foreground(p.Accent).Render("▌")
 		for i, ln := range out {
-			out[i] = bar + padLine(ln, w-1, p.SelBg)
+			out[i] = bar + theme.FillBg(ln, w-1, p.SelBg)
 		}
 	case mention:
 		bar := lipgloss.NewStyle().Foreground(p.Orange).Render("▌")
 		for i, ln := range out {
-			out[i] = bar + padLine(ln, w-1, p.MentionBg)
+			out[i] = bar + theme.FillBg(ln, w-1, p.MentionBg)
 		}
 	}
 	return out

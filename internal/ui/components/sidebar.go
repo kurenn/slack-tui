@@ -59,17 +59,22 @@ func SelectableIndexes(items []SideItem) []int {
 
 // SidebarBody renders the sidebar list to a body string. selIndex is a flat-list
 // index; the cursor highlight only shows when focused.
-func SidebarBody(p theme.Palette, ws *data.Workspace, items []SideItem, activeID string, selIndex int, focused bool, innerW int) string {
+// SidebarBody renders the sidebar to lines plus the line index of the cursor row
+// (so the caller can scroll it into view).
+func SidebarBody(p theme.Palette, ws *data.Workspace, items []SideItem, activeID string, selIndex int, focused bool, innerW int) (lines []string, cursorLine int) {
 	header := lipgloss.NewStyle().Foreground(p.Dim2)
-	lines := []string{""} // top breathing room
+	lines = append(lines, "") // top breathing room
 	for i, it := range items {
 		if it.Header {
 			lines = append(lines, " "+header.Render(it.Label))
 			continue
 		}
+		if i == selIndex {
+			cursorLine = len(lines)
+		}
 		lines = append(lines, sideRow(p, ws, it.Conv, i == selIndex && focused, it.Conv.ID == activeID, innerW))
 	}
-	return strings.Join(lines, "\n")
+	return lines, cursorLine
 }
 
 // sideRow renders one conversation row. The active/cursor highlight is inset one

@@ -33,12 +33,13 @@ func (m Model) View() string {
 		panes = 3
 	}
 
-	// ── sidebar ──
+	// ── sidebar (scrolls to keep the cursor visible) ──
 	items := m.sideItems()
+	sideLines, sideCursor := components.SidebarBody(m.pal, m.ws, items, m.activeID, m.sideSel, m.focus == focusSidebar, sidebarWidth-2)
+	sideBody := strings.Join(windowLines(sideLines, sideCursor, sideCursor, bodyH-2), "\n")
 	sidebar := pane.Render(m.pal, pane.Options{
 		Title: "workspace", Right: "@" + m.ws.Handle, Focused: m.focus == focusSidebar,
-		Width: sidebarWidth, Height: bodyH,
-		Body: components.SidebarBody(m.pal, m.ws, items, m.activeID, m.sideSel, m.focus == focusSidebar, sidebarWidth-2),
+		Width: sidebarWidth, Height: bodyH, Body: sideBody,
 	})
 
 	// ── center: messages pane + composer ──

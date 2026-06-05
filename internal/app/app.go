@@ -59,6 +59,9 @@ type Model struct {
 	paletteQuery textinput.Model
 	paletteIndex int
 
+	settingsOpen bool
+	settingsSel  int
+
 	width, height int
 	gPending      time.Time
 }
@@ -331,6 +334,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, m.openPalette()
 		}
+		if m.settingsOpen {
+			return m.settingsKey(msg)
+		}
 		if m.paletteOpen {
 			return m.paletteKey(msg)
 		}
@@ -391,6 +397,9 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "ctrl+r": // manual refresh of the active channel + open thread
 		return m, m.refresh()
+	case ",": // open the settings overlay
+		m.openSettings()
+		return m, nil
 
 	case "tab":
 		m.focus = order[(idx+1)%len(order)]

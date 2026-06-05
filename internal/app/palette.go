@@ -32,6 +32,7 @@ func (m Model) paletteItems() []palItem {
 		hintsLabel = "Hide key hints"
 	}
 	items = append(items,
+		palItem{"cmd:settings", components.PaletteItem{Icon: "⚙", Label: "Settings", Hint: "appearance · presence", Kind: "cmd"}},
 		palItem{"cmd:theme", components.PaletteItem{Icon: "▣", Label: "Cycle theme", Hint: "appearance", Kind: "cmd"}},
 		palItem{"cmd:hints", components.PaletteItem{Icon: "⌨", Label: hintsLabel, Hint: "status bar", Kind: "cmd"}},
 		palItem{"cmd:active", components.PaletteItem{Icon: "●", Label: "Set status: active", Hint: "presence", Kind: "cmd"}},
@@ -108,6 +109,8 @@ func (m *Model) runPalette(id string) tea.Cmd {
 		return m.openChannel(strings.TrimPrefix(id, "ch:"))
 	case strings.HasPrefix(id, "dm:"):
 		return m.openChannel(strings.TrimPrefix(id, "dm:"))
+	case id == "cmd:settings":
+		m.openSettings()
 	case id == "cmd:theme":
 		i := indexOf(theme.Cycle, m.prefs.Theme)
 		m.prefs.Theme = theme.Cycle[(i+1)%len(theme.Cycle)]

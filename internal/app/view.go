@@ -68,6 +68,9 @@ func (m Model) View() string {
 	if m.paletteOpen {
 		frame = m.overlayPalette(frame)
 	}
+	if m.settingsOpen {
+		frame = m.overlaySettings(frame)
+	}
 	return frame
 }
 

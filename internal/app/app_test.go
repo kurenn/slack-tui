@@ -1,11 +1,37 @@
 package app
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/abrahamkuri/slack-tui/internal/data"
 	"github.com/abrahamkuri/slack-tui/internal/source"
 )
+
+func TestSettingsPanel(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // keep config.Save off the real config dir
+	m := newSized()
+	m.openSettings()
+	if !m.settingsOpen {
+		t.Fatal("settings should be open")
+	}
+	m.settingsSel = 1 // accent
+	before := m.prefs.Accent
+	m.cycleSetting(1)
+	if m.prefs.Accent == before {
+		t.Errorf("cycling accent should change it (was %q)", before)
+	}
+	out := ansi.Strip(m.View())
+	if !strings.Contains(out, "settings") || !strings.Contains(out, "Accent") {
+		t.Error("settings overlay not rendered in the frame")
+	}
+	m = Key(m, "esc")
+	if m.settingsOpen {
+		t.Error("esc should close settings")
+	}
+}
 
 func init() { /* tests drive the model headlessly via Key/WithSize */ }
 

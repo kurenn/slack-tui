@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/abrahamkuri/slack-tui/internal/theme"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // tokRe mirrors the prototype's TOK_RE: `code`, @mention, #channel, url.

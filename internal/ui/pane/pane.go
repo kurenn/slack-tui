@@ -7,9 +7,9 @@ package pane
 import (
 	"strings"
 
+	"github.com/abrahamkuri/slack-tui/internal/theme"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/abrahamkuri/slack-tui/internal/theme"
 )
 
 // Options configures a pane render. Width/Height are the OUTER dimensions in
@@ -88,7 +88,7 @@ func topRule(bs, ts, rs lipgloss.Style, title, right string, innerW int) string 
 	title = ansi.Truncate(title, maxTitle, "…")
 	tlen := lipgloss.Width(title)
 
-	leftVis := 3 + tlen   // "─ " + title + " "
+	leftVis := 3 + tlen // "─ " + title + " "
 	rightWidth := 0
 	if right != "" {
 		rightWidth = rlen + 3 // " " + right + " ─"

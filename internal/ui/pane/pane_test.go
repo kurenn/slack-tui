@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/abrahamkuri/slack-tui/internal/theme"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestRenderDimensions(t *testing.T) {

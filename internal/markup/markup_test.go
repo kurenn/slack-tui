@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/x/ansi"
 	"github.com/abrahamkuri/slack-tui/internal/theme"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestInlinePreservesText(t *testing.T) {

@@ -134,12 +134,17 @@ func (m Model) stageColumn(p theme.Palette, t trainerState, stageW int) []string
 }
 
 // miniApp renders the bordered miniature message app (messages + composer).
+// During the palette drill, an open practice palette replaces the message area.
 func (m Model) miniApp(p theme.Palette, t trainerState, w int) []string {
 	bs := lipgloss.NewStyle().Foreground(p.Border)
 	innerW := w - 2
 	var rows []string
-	for i, mm := range miniMsgs {
-		rows = append(rows, m.miniMessage(p, t, i, mm, innerW)...)
+	if t.paletteOpen {
+		rows = miniPalette(p, innerW)
+	} else {
+		for i, mm := range miniMsgs {
+			rows = append(rows, m.miniMessage(p, t, i, mm, innerW)...)
+		}
 	}
 
 	// composer
@@ -212,6 +217,38 @@ func (m Model) miniMessage(p theme.Palette, t trainerState, i int, mm miniMsg, w
 		}
 	}
 	return lines
+}
+
+// miniPalette renders the practice command-palette overlay shown during the
+// palette drill: an accent-bordered box with an input row and a few items.
+func miniPalette(p theme.Palette, innerW int) []string {
+	pbW := innerW - 2
+	ab := lipgloss.NewStyle().Foreground(p.Accent)
+	contentW := pbW - 2
+
+	row := func(s string, sel bool) string {
+		bg := p.Bg
+		if sel {
+			bg = p.SelBg
+		}
+		return ab.Render("│") + lipgloss.NewStyle().Width(contentW).Background(bg).Render(ansi.Truncate(s, contentW, "")) + ab.Render("│")
+	}
+	ch := lipgloss.NewStyle().Foreground(p.Blue).Render("#")
+	cmd := lipgloss.NewStyle().Foreground(p.Purple).Render("▣")
+	fg := lipgloss.NewStyle().Foreground(p.Fg)
+	dim := lipgloss.NewStyle().Foreground(p.Dim)
+	dim2 := lipgloss.NewStyle().Foreground(p.Dim2)
+
+	out := []string{
+		" " + ab.Render("┌"+strings.Repeat("─", pbW-2)+"┐"),
+		" " + row(" "+ab.Bold(true).Render(":")+"  "+dim2.Render("jump to channel, run a command…"), false),
+		" " + row("  "+ch+"  "+fg.Render("engineering"), true),
+		" " + row("  "+ch+"  "+dim.Render("design"), false),
+		" " + row("  "+cmd+"  "+dim.Render("Cycle theme"), false),
+		" " + row("  "+dim2.Render("press esc to close"), false),
+		" " + ab.Render("└"+strings.Repeat("─", pbW-2)+"┘"),
+	}
+	return out
 }
 
 // miniText renders a mini message body, highlighting @you.

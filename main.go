@@ -36,6 +36,11 @@ func main() {
 		var w, h int
 		if _, err := fmt.Sscanf(os.Args[2], "%dx%d", &w, &h); err == nil {
 			m := onboarding.Goto(onboarding.New(), os.Args[3])
+			if len(os.Args) >= 5 {
+				for _, key := range strings.Split(os.Args[4], ",") {
+					m = onboarding.Key(m, key)
+				}
+			}
 			fmt.Println(onboarding.Dump(m, w, h))
 			return
 		}

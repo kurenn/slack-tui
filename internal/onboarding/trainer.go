@@ -21,15 +21,15 @@ var drills = []drill{
 
 // miniMsg is a row in the trainer's miniature message list.
 type miniMsg struct {
-	user, color, time, text string
-	replies                 int
-	mentionMe               bool
+	user, color, time, text, react string
+	replies                        int
+	mentionMe                      bool
 }
 
 var miniMsgs = []miniMsg{
-	{"ada.k", "purple", "09:21", "pushed the render-loop refactor — only repaints dirty cells now", 3, false},
-	{"lin.z", "green", "09:27", "that is going to make scroll-back buttery. nice work", 0, false},
-	{"lin.z", "green", "09:38", "hey @you — can you take the keyboard-focus ticket?", 0, true},
+	{user: "ada.k", color: "purple", time: "09:21", text: "pushed the render-loop refactor — only repaints dirty cells now", react: "🔥 6", replies: 3},
+	{user: "lin.z", color: "green", time: "09:27", text: "that is going to make scroll-back buttery. nice work"},
+	{user: "lin.z", color: "green", time: "09:38", text: "hey @you — can you take the keyboard-focus ticket?", mentionMe: true},
 }
 
 // trainerState holds the interactive trainer's mini-app state.
@@ -49,7 +49,7 @@ type trainerState struct {
 func newTrainer() trainerState {
 	ti := textinput.New()
 	ti.Prompt = ""
-	return trainerState{mode: "normal", mini: ti}
+	return trainerState{mode: "normal", mini: ti, sel: len(miniMsgs) - 1}
 }
 
 // needsEsc reports whether the trainer must consume Esc for the current drill

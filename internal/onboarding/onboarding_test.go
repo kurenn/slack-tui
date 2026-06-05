@@ -123,6 +123,60 @@ func TestKeyboardStepEscCancelsInsertBeforeBack(t *testing.T) {
 	}
 }
 
+// TestTrainerRealFlow drives the trainer through the actual command path —
+// executing the 900ms auto-advance ticks — to prove every drill (especially
+// threads) completes in the live flow, not just via injected messages.
+func TestTrainerRealFlow(t *testing.T) {
+	m := sized()
+	m.phase = phaseWizard
+	m.stepIndex = 3
+	var c tea.Cmd
+
+	// navigate: j then k
+	m, _ = KeyC(m, "j")
+	m, c = KeyC(m, "k")
+	if !m.trainer.done[0] {
+		t.Fatal("navigate (j+k) did not complete")
+	}
+	m = Pump(m, c) // auto-advance → compose
+	if m.trainer.drill != 1 {
+		t.Fatalf("after navigate, drill=%d want 1", m.trainer.drill)
+	}
+
+	// compose: i, type, enter
+	m, _ = KeyC(m, "i")
+	m, _ = KeyC(m, "x")
+	m, c = KeyC(m, "enter")
+	if !m.trainer.done[1] {
+		t.Fatal("compose did not complete")
+	}
+	m = Pump(m, c) // → threads
+	if m.trainer.drill != 2 {
+		t.Fatalf("after compose, drill=%d want 2", m.trainer.drill)
+	}
+
+	// threads: press t  ← the reported-broken step
+	m, c = KeyC(m, "t")
+	if !m.trainer.done[2] {
+		t.Fatal("pressing t did not complete the threads drill")
+	}
+	m = Pump(m, c) // → palette
+	if m.trainer.drill != 3 {
+		t.Fatalf("after threads, drill=%d want 3", m.trainer.drill)
+	}
+
+	// palette: ctrl+k then esc
+	m, _ = KeyC(m, "ctrl+k")
+	m, c = KeyC(m, "esc")
+	if !m.trainer.done[3] {
+		t.Fatal("palette did not complete")
+	}
+	m = Pump(m, c)
+	if !m.kbDone {
+		t.Fatal("kbDone should be true after all four drills")
+	}
+}
+
 func TestTrainerCompletesAllDrills(t *testing.T) {
 	m := sized()
 	m.phase = phaseWizard

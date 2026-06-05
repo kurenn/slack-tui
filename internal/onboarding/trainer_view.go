@@ -1,6 +1,7 @@
 package onboarding
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -9,76 +10,117 @@ import (
 	"github.com/abrahamkuri/slack-tui/internal/theme"
 )
 
-var drillInstr = []string{
-	"Press j and k to move the selection down and up.",
-	"Press i to enter INSERT, type a reply, then ↵ to send. esc cancels.",
-	"Select a message and press t to open its thread.",
-	"Press ⌃K to open the command palette, then esc to close.",
+const trainerRailW = 22
+
+var drillAside = []string{
+	"Movement keys work in every pane — the sidebar, the message list, and threads.",
+	"No send button to hunt for. Your hands never leave home row.",
+	"Threads keep side-conversations out of the main flow.",
+	"The palette jumps to any channel or runs a command — the fastest way around.",
 }
 
+// kc renders a keycap chip used inside instruction text.
+func kc(p theme.Palette, s string) string {
+	return lipgloss.NewStyle().Foreground(p.Accent).Render("[" + s + "]")
+}
+
+func drillInstruction(p theme.Palette, drill int) string {
+	fg := lipgloss.NewStyle().Foreground(p.Fg)
+	switch drill {
+	case 0:
+		return fg.Render("Press ") + kc(p, "j") + fg.Render(" and ") + kc(p, "k") + fg.Render(" to move the selection down and up.")
+	case 1:
+		return fg.Render("Press ") + kc(p, "i") + fg.Render(" to enter INSERT, type a reply, then ") + kc(p, "↵") + fg.Render(" to send.")
+	case 2:
+		return fg.Render("Select a message and press ") + kc(p, "t") + fg.Render(" to open its thread.")
+	default:
+		return fg.Render("Press ") + kc(p, "⌃K") + fg.Render(" to open the command palette, then ") + kc(p, "esc") + fg.Render(" to close.")
+	}
+}
+
+// viewTrainer renders the two-column trainer box: drill rail | stage.
 func (m Model) viewTrainer(p theme.Palette, w int) string {
 	t := m.trainer
+	stageW := w - trainerRailW - 3 // outer borders (2) + divider (1)
 
-	// drill rail
-	var rail []string
+	rail := m.railColumn(p, t)
+	stage := m.stageColumn(p, t, stageW)
+	h := len(stage)
+	if len(rail) > h {
+		h = len(rail)
+	}
+
+	bs := lipgloss.NewStyle().Foreground(p.Border)
+	var b strings.Builder
+	b.WriteString(bs.Render("┌"+strings.Repeat("─", trainerRailW)+"┬"+strings.Repeat("─", stageW)+"┐") + "\n")
+	for i := 0; i < h; i++ {
+		rc, sc := "", ""
+		if i < len(rail) {
+			rc = rail[i]
+		}
+		if i < len(stage) {
+			sc = stage[i]
+		}
+		b.WriteString(bs.Render("│") + padPlain(rc, trainerRailW) + bs.Render("│") + padPlain(sc, stageW) + bs.Render("│") + "\n")
+	}
+	b.WriteString(bs.Render("└" + strings.Repeat("─", trainerRailW) + "┴" + strings.Repeat("─", stageW) + "┘"))
+	return b.String()
+}
+
+// railColumn renders the drill tabs.
+func (m Model) railColumn(p theme.Palette, t trainerState) []string {
+	out := []string{""}
 	for i, d := range drills {
-		glyph, c := "○", p.Dim2
-		if t.done[i] {
-			glyph, c = "◉", p.Green
-		} else if i == t.drill {
-			glyph, c = "▸", p.Accent
+		cur := i == t.drill
+		done := t.done[i]
+		mark, markColor := "○", p.Dim2
+		if done {
+			mark, markColor = "◉", p.Green
+		} else if cur {
+			mark, markColor = "▸", p.Accent
 		}
-		rail = append(rail, lipgloss.NewStyle().Foreground(c).Render(glyph+" ")+
-			lipgloss.NewStyle().Foreground(railLabelColor(p, i, t)).Render(d.label))
-	}
-	railLine := strings.Join(rail, lipgloss.NewStyle().Foreground(p.Dim2).Render("   "))
-	instr := wrapStyled(lipgloss.NewStyle().Foreground(p.Dim), drillInstr[t.drill], w)
-
-	// mini app box: sized for symmetric margins inside the card's content area.
-	innerW := w - 2
-	cw := innerW - 2
-	var lines []string
-	for i, mm := range miniMsgs {
-		tm := lipgloss.NewStyle().Foreground(p.Dim2).Render(mm.time + " ")
-		user := lipgloss.NewStyle().Foreground(p.Token(mm.color)).Bold(true).Render(mm.user + " ")
-		text := miniText(p, mm.text)
-		line := tm + user + text
-		if i == t.sel && t.drill == 0 {
-			line = lipgloss.NewStyle().Foreground(p.Accent).Render("▌") +
-				lipgloss.NewStyle().Width(cw-1).Background(p.SelBg).Render(ansi.Truncate(line, cw-1, ""))
-		} else {
-			line = " " + ansi.Truncate(line, cw-1, "")
+		labelColor := p.Dim
+		if cur {
+			labelColor = p.Fg
 		}
-		lines = append(lines, line)
-	}
-
-	// composer
-	var comp string
-	if t.mode == "insert" && t.drill == 1 {
-		comp = lipgloss.NewStyle().Foreground(p.Bg).Background(p.Green).Bold(true).Render(" INSERT ") +
-			lipgloss.NewStyle().Foreground(p.Accent).Render(" ❯ ") + t.mini.View()
-	} else {
-		ph := "press i to write"
-		if t.drill != 1 {
-			ph = "message #engineering"
+		bar := " "
+		if cur {
+			bar = lipgloss.NewStyle().Foreground(p.Accent).Render("▌")
 		}
-		comp = lipgloss.NewStyle().Foreground(p.Accent).Render(" NORMAL ") +
-			lipgloss.NewStyle().Foreground(p.Dim2).Render(" · "+ph)
+		left := bar + " " + lipgloss.NewStyle().Foreground(markColor).Render(mark) + " " +
+			lipgloss.NewStyle().Foreground(labelColor).Render(d.label)
+		keys := lipgloss.NewStyle().Foreground(p.Dim2).Render(d.keys)
+		gap := trainerRailW - lipgloss.Width(left) - lipgloss.Width(keys) - 1
+		if gap < 1 {
+			gap = 1
+		}
+		line := left + strings.Repeat(" ", gap) + keys + " "
+		if cur {
+			line = lipgloss.NewStyle().Background(p.SelBg).Render(padPlain(line, trainerRailW))
+		}
+		out = append(out, line, "")
 	}
-	lines = append(lines, "", comp)
+	return out
+}
 
-	if t.paletteOpen {
-		lines = append(lines, "",
-			lipgloss.NewStyle().Foreground(p.Accent).Render(" : ")+lipgloss.NewStyle().Foreground(p.Dim).Render("jump to channel, run a command…"),
-			lipgloss.NewStyle().Foreground(p.Blue).Render(" # ")+lipgloss.NewStyle().Foreground(p.Fg).Render("engineering"),
-			lipgloss.NewStyle().Foreground(p.Dim2).Render("   press esc to close"))
+// stageColumn renders the instruction, aside, and the mini app.
+func (m Model) stageColumn(p theme.Palette, t trainerState, stageW int) []string {
+	pad := func(s string) string { return " " + s }
+	textW := stageW - 2
+
+	var out []string
+	out = append(out, "")
+	for _, l := range strings.Split(lipgloss.NewStyle().Width(textW).Render(drillInstruction(p, t.drill)), "\n") {
+		out = append(out, pad(l))
 	}
-
-	box := lipgloss.NewStyle().Width(innerW).Padding(0, 1).
-		Border(lipgloss.NormalBorder()).BorderForeground(p.Border).
-		Render(strings.Join(lines, "\n"))
-
-	out := []string{railLine, "", instr, "", box}
+	for _, l := range strings.Split(lipgloss.NewStyle().Width(textW).Foreground(p.Dim).Render(drillAside[t.drill]), "\n") {
+		out = append(out, pad(l))
+	}
+	out = append(out, "")
+	for _, l := range m.miniApp(p, t, stageW-2) {
+		out = append(out, pad(l))
+	}
+	out = append(out, "")
 	if t.done[t.drill] {
 		banner := "✓ " + drills[t.drill].label + " — got it"
 		if t.drill == len(drills)-1 {
@@ -86,19 +128,90 @@ func (m Model) viewTrainer(p theme.Palette, w int) string {
 		} else {
 			banner += ", next drill…"
 		}
-		out = append(out, lipgloss.NewStyle().Foreground(p.Green).Render(banner))
+		out = append(out, pad(lipgloss.NewStyle().Foreground(p.Green).Render(banner)))
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, out...)
+	return out
 }
 
-func railLabelColor(p theme.Palette, i int, t trainerState) lipgloss.Color {
-	if t.done[i] {
-		return p.Fg
+// miniApp renders the bordered miniature message app (messages + composer).
+func (m Model) miniApp(p theme.Palette, t trainerState, w int) []string {
+	bs := lipgloss.NewStyle().Foreground(p.Border)
+	innerW := w - 2
+	var rows []string
+	for i, mm := range miniMsgs {
+		rows = append(rows, m.miniMessage(p, t, i, mm, innerW)...)
 	}
-	if i == t.drill {
-		return p.Fg
+
+	// composer
+	var chip string
+	if t.mode == "insert" {
+		chip = lipgloss.NewStyle().Background(p.Green).Foreground(p.Bg).Bold(true).Render(" INSERT ")
+	} else {
+		chip = lipgloss.NewStyle().Background(p.Accent).Foreground(p.Bg).Bold(true).Render(" NORMAL ")
 	}
-	return p.Dim
+	var composer string
+	if t.mode == "insert" && t.drill == 1 {
+		composer = chip + lipgloss.NewStyle().Foreground(p.Accent).Render("  ❯ ") + t.mini.View()
+	} else {
+		ph := "message #engineering"
+		if t.drill == 1 {
+			ph = "press i to write"
+		}
+		composer = chip + lipgloss.NewStyle().Foreground(p.Dim2).Render("  · "+ph)
+	}
+
+	var out []string
+	out = append(out, bs.Render("┌"+strings.Repeat("─", innerW)+"┐"))
+	for _, r := range rows {
+		out = append(out, bs.Render("│")+padPlain(" "+r, innerW)+bs.Render("│"))
+	}
+	out = append(out, bs.Render("├"+strings.Repeat("─", innerW)+"┤"))
+	out = append(out, bs.Render("│")+padPlain(" "+composer, innerW)+bs.Render("│"))
+	out = append(out, bs.Render("└"+strings.Repeat("─", innerW)+"┘"))
+	return out
+}
+
+// miniMessage renders one mini message (possibly multi-line), with selection,
+// reactions, and the thread affordance.
+func (m Model) miniMessage(p theme.Palette, t trainerState, i int, mm miniMsg, w int) []string {
+	sel := i == t.sel
+	const gutter = 6
+	bodyW := w - gutter - 1
+	if bodyW < 8 {
+		bodyW = 8
+	}
+
+	tm := lipgloss.NewStyle().Foreground(p.Dim2).Width(gutter).Render(mm.time)
+	user := lipgloss.NewStyle().Foreground(p.Token(mm.color)).Bold(true).Render(mm.user + " ")
+	head := tm + user + miniText(p, mm.text)
+
+	var lines []string
+	for _, l := range strings.Split(lipgloss.NewStyle().Width(w-1).Render(head), "\n") {
+		lines = append(lines, l)
+	}
+	replies := mm.replies
+	if i == 0 && t.sent {
+		replies++
+	}
+	if mm.react != "" {
+		lines = append(lines, strings.Repeat(" ", gutter)+lipgloss.NewStyle().Background(p.SelBg).Render(" "+mm.react+" "))
+	}
+	if replies > 0 {
+		aff := lipgloss.NewStyle().Foreground(p.Dim).Render("└─ ") +
+			lipgloss.NewStyle().Foreground(p.Accent).Render(fmt.Sprintf("%d replies", replies))
+		if t.drill == 2 && !t.threadOpen {
+			aff += lipgloss.NewStyle().Foreground(p.Dim2).Render("  ↵ press t")
+		}
+		lines = append(lines, strings.Repeat(" ", gutter)+aff)
+	}
+
+	if sel {
+		bar := lipgloss.NewStyle().Foreground(p.Accent).Render("▌")
+		for j, l := range lines {
+			lines[j] = bar + lipgloss.NewStyle().Width(w-1).Background(p.SelBg).Render(ansi.Truncate(l, w-1, ""))
+		}
+	}
+	return lines
 }
 
 // miniText renders a mini message body, highlighting @you.

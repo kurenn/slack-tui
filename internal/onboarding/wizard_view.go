@@ -271,11 +271,10 @@ func (m Model) viewFooter(p theme.Palette, w int) string {
 	if m.stepIndex == len(wizSteps)-1 {
 		label = "finish ↵"
 	}
-	var cont string
+	button := lipgloss.NewStyle().Background(p.Accent).Foreground(p.Bg).Bold(true).Padding(0, 1).Render(label)
+	cont := button
 	if m.step() == "keyboard" && !m.kbDone {
-		cont = lipgloss.NewStyle().Foreground(p.Dim2).Render("complete the drills to continue")
-	} else {
-		cont = lipgloss.NewStyle().Background(p.Accent).Foreground(p.Bg).Bold(true).Padding(0, 1).Render(label)
+		cont = lipgloss.NewStyle().Foreground(p.Dim2).Render("complete the drills to continue") + "   " + button
 	}
 	gap := w - lipgloss.Width(back) - lipgloss.Width(cont)
 	if gap < 1 {

@@ -109,9 +109,16 @@ func sideRow(p theme.Palette, ws *data.Workspace, c data.Conversation, cursor, a
 	}
 	content := lead + strings.Repeat(" ", gap) + badge + " "
 
+	// Left margin marks state: cursor bar, then an unread dot (orange for a
+	// mention, accent otherwise).
 	leftMargin, rightMargin := " ", " "
-	if cursor {
+	switch {
+	case cursor:
 		leftMargin = lipgloss.NewStyle().Foreground(p.Accent).Render("▌")
+	case c.Mention:
+		leftMargin = lipgloss.NewStyle().Foreground(p.Orange).Render("•")
+	case unread:
+		leftMargin = lipgloss.NewStyle().Foreground(p.Accent).Render("•")
 	}
 	if active || cursor {
 		content = lipgloss.NewStyle().Width(region).Background(p.SelBg).Render(content)

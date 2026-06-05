@@ -1,11 +1,13 @@
 package source
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/slack-go/slack"
@@ -83,6 +85,8 @@ func (s *Slack) Load() (*data.Workspace, error) {
 	}
 	sort.Slice(channels, func(i, j int) bool { return channels[i].Name < channels[j].Name })
 	sort.Slice(dms, func(i, j int) bool { return dms[i].Name < dms[j].Name })
+	s.fillUnread(channels)
+	s.fillUnread(dms)
 
 	ws := &data.Workspace{
 		Name: auth.Team, Handle: slugify(auth.Team), MeID: s.meID,
@@ -90,6 +94,32 @@ func (s *Slack) Load() (*data.Workspace, error) {
 	}
 	ws.Users[s.meID] = me
 	return ws, nil
+}
+
+// fillUnread populates each conversation's unread count via conversations.info,
+// concurrently and bounded, with an overall timeout so startup can't hang.
+func (s *Slack) fillUnread(convs []data.Conversation) {
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	sem := make(chan struct{}, 16)
+	var wg sync.WaitGroup
+	for i := range convs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				return
+			}
+			ci, err := s.api.GetConversationInfoContext(ctx, &slack.GetConversationInfoInput{ChannelID: convs[i].ID})
+			if err == nil && ci.UnreadCountDisplay > 0 {
+				convs[i].Unread = ci.UnreadCountDisplay
+			}
+		}(i)
+	}
+	wg.Wait()
 }
 
 // History fetches recent messages (newest last), resolving threads.

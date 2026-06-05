@@ -92,6 +92,37 @@ func TestWizardKeyboardGate(t *testing.T) {
 	}
 }
 
+func TestKeyboardStepEscGoesBack(t *testing.T) {
+	m := sized()
+	m.phase = phaseWizard
+	m.stepIndex = 3 // keyboard
+	m = Key(m, "esc")
+	if m.stepIndex != 2 {
+		t.Fatalf("esc on keyboard step should go back to density (stepIndex=%d)", m.stepIndex)
+	}
+}
+
+func TestKeyboardStepEscCancelsInsertBeforeBack(t *testing.T) {
+	m := sized()
+	m.phase = phaseWizard
+	m.stepIndex = 3
+	// advance to the compose drill and enter insert
+	m = Key(m, "j")
+	m = Key(m, "k")
+	m = update(m, advanceDrillMsg{}) // → drill 1
+	m = Key(m, "i")                  // enter insert
+	if !(m.trainer.mode == "insert" && m.trainer.drill == 1) {
+		t.Fatalf("expected compose-insert state, got mode=%q drill=%d", m.trainer.mode, m.trainer.drill)
+	}
+	m = Key(m, "esc") // should cancel insert, NOT navigate back
+	if m.stepIndex != 3 {
+		t.Errorf("esc during compose-insert should not leave the keyboard step (stepIndex=%d)", m.stepIndex)
+	}
+	if m.trainer.mode != "normal" {
+		t.Errorf("esc should cancel insert, mode=%q", m.trainer.mode)
+	}
+}
+
 func TestTrainerCompletesAllDrills(t *testing.T) {
 	m := sized()
 	m.phase = phaseWizard

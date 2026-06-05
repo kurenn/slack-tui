@@ -52,6 +52,13 @@ func newTrainer() trainerState {
 	return trainerState{mode: "normal", mini: ti}
 }
 
+// needsEsc reports whether the trainer must consume Esc for the current drill
+// (canceling the compose INSERT, or closing the practice palette). Otherwise Esc
+// is free to navigate the wizard back a step.
+func (t trainerState) needsEsc() bool {
+	return (t.mode == "insert" && t.drill == 1) || t.paletteOpen
+}
+
 // markDone marks a drill complete and returns the auto-advance command.
 func (m *Model) markDone(idx int) tea.Cmd {
 	if m.trainer.done[idx] {

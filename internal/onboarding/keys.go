@@ -156,6 +156,10 @@ func (m Model) identityKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m Model) wizardKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	k := msg.String()
 	if m.step() == "keyboard" {
+		// Esc / h navigate back unless the trainer needs Esc for the active drill.
+		if (k == "esc" || k == "h") && !m.trainer.needsEsc() {
+			return m.back()
+		}
 		var cmd tea.Cmd
 		m, cmd = m.trainerKey(msg)
 		if m.kbDone && k == "enter" {

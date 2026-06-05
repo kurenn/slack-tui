@@ -4,7 +4,7 @@
 package app
 
 import (
-	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -15,6 +15,7 @@ import (
 
 	"github.com/abrahamkuri/slack-tui/internal/config"
 	"github.com/abrahamkuri/slack-tui/internal/data"
+	"github.com/abrahamkuri/slack-tui/internal/source"
 	"github.com/abrahamkuri/slack-tui/internal/theme"
 	"github.com/abrahamkuri/slack-tui/internal/ui/components"
 )
@@ -31,11 +32,13 @@ const (
 
 // Model is the application state.
 type Model struct {
+	src       source.Source
 	ws        *data.Workspace
 	prefs     config.Prefs
 	pal       theme.Palette
 	density   theme.Density
 	showHints bool
+	loadErr   error
 
 	messages map[string][]data.Message
 	meta     map[string]components.Meta
@@ -60,10 +63,25 @@ type Model struct {
 	gPending      time.Time
 }
 
-// New builds the initial model from saved (or default) prefs.
+// New builds the initial model from saved (or default) prefs. The data source is
+// real Slack when SLACK_USER_TOKEN is set, otherwise the local mock. The active
+// channel's history is loaded synchronously; other channels load on open.
 func New() Model {
 	prefs, _ := config.Load()
-	ws := data.Mock()
+
+	var src source.Source
+	if tok := os.Getenv("SLACK_USER_TOKEN"); tok != "" {
+		src = source.NewSlack(tok)
+	} else {
+		src = source.NewMock()
+	}
+	ws, err := src.Load()
+	var loadErr error
+	if err != nil { // fall back to the mock so the app still runs; surface the error
+		loadErr = err
+		src = source.NewMock()
+		ws, _ = src.Load()
+	}
 
 	// Onboarding hand-off: adopt the chosen handle as the current user's identity.
 	if prefs.Handle != "" {
@@ -72,10 +90,6 @@ func New() Model {
 		ws.Users[ws.MeID] = me
 	}
 
-	messages := make(map[string][]data.Message, len(ws.Messages))
-	for k, v := range ws.Messages {
-		messages[k] = append([]data.Message(nil), v...)
-	}
 	meta := map[string]components.Meta{}
 	for _, c := range append(append([]data.Conversation{}, ws.Channels...), ws.DMs...) {
 		meta[c.ID] = components.Meta{Unread: c.Unread, Mention: c.Mention}
@@ -87,23 +101,36 @@ func New() Model {
 		return ti
 	}
 
+	activeID := "engineering"
+	if _, ok := ws.Conversation(activeID); !ok { // real Slack: pick the first channel/DM
+		switch {
+		case len(ws.Channels) > 0:
+			activeID = ws.Channels[0].ID
+		case len(ws.DMs) > 0:
+			activeID = ws.DMs[0].ID
+		}
+	}
+
 	m := Model{
+		src:          src,
 		ws:           ws,
 		prefs:        prefs,
 		pal:          theme.Resolve(prefs.Theme, prefs.Accent),
 		density:      theme.ParseDensity(prefs.Density),
 		showHints:    true,
-		messages:     messages,
+		loadErr:      loadErr,
+		messages:     map[string][]data.Message{},
 		meta:         meta,
 		myStatus:     prefs.Status,
-		activeID:     "engineering",
+		activeID:     activeID,
 		focus:        focusMessages,
 		draft:        mkInput(),
 		threadDraft:  mkInput(),
 		paletteQuery: mkInput(),
 	}
-	m.sideSel = m.flatIndexOf("engineering")
-	m.msgSel = max(0, len(m.messages["engineering"])-1)
+	m.ensureHistory(activeID)
+	m.sideSel = m.flatIndexOf(activeID)
+	m.msgSel = max(0, len(m.messages[activeID])-1)
 	return m
 }
 
@@ -156,8 +183,22 @@ func (m Model) threadRoot() (data.Message, bool) {
 
 // ── navigation actions ──────────────────────────────────────────────────────
 
+// ensureHistory loads a conversation's messages once and caches them (an empty
+// entry still counts as loaded, so we never refetch).
+func (m *Model) ensureHistory(id string) {
+	if _, ok := m.messages[id]; ok {
+		return
+	}
+	msgs, err := m.src.History(id)
+	if err != nil {
+		m.loadErr = err
+	}
+	m.messages[id] = msgs
+}
+
 func (m *Model) openChannel(id string) {
 	m.activeID = id
+	m.ensureHistory(id)
 	m.msgSel = max(0, len(m.messages[id])-1)
 	m.meta[id] = components.Meta{Unread: 0, Mention: false}
 	m.focus = focusMessages
@@ -195,9 +236,12 @@ func (m *Model) sendMessage() {
 	if text == "" {
 		return
 	}
-	m.messages[m.activeID] = append(m.messages[m.activeID], data.Message{
-		ID: "m" + nowStamp(), UserID: "me", Time: nowTime(), Text: text,
-	})
+	msg, err := m.src.Send(m.activeID, text)
+	if err != nil {
+		m.loadErr = err
+		return
+	}
+	m.messages[m.activeID] = append(m.messages[m.activeID], msg)
 	m.draft.SetValue("")
 	m.msgSel = len(m.messages[m.activeID]) - 1
 }
@@ -207,12 +251,15 @@ func (m *Model) sendReply() {
 	if text == "" || m.threadRootID == "" {
 		return
 	}
+	r, err := m.src.SendReply(m.activeID, m.threadRootID, text)
+	if err != nil {
+		m.loadErr = err
+		return
+	}
 	for k, list := range m.messages {
 		for i := range list {
 			if list[i].ID == m.threadRootID {
-				list[i].Replies = append(list[i].Replies, data.Reply{
-					ID: "r" + nowStamp(), UserID: "me", Time: nowTime(), Text: text,
-				})
+				list[i].Replies = append(list[i].Replies, r)
 			}
 		}
 		m.messages[k] = list
@@ -462,13 +509,6 @@ func max(a, b int) int {
 	}
 	return b
 }
-
-func nowTime() string {
-	now := time.Now()
-	return fmt.Sprintf("%02d:%02d", now.Hour(), now.Minute())
-}
-
-func nowStamp() string { return fmt.Sprintf("%d", time.Now().UnixNano()) }
 
 // gap renders a 1-col vertical separator filled with the app background.
 func (m Model) gap(height int) string {

@@ -55,6 +55,15 @@ func (m Model) View() string {
 	status := components.StatusBar(m.pal, m.insert, m.locName(conv), m.focus, m.hints(), m.showHints, m.width)
 	frame := strings.Join([]string{title, workspace, status}, "\n")
 
+	if m.loadErr != nil {
+		msg := " ⚠ slack: " + m.loadErr.Error()
+		if r := []rune(msg); len(r) > m.width {
+			msg = string(r[:m.width-1]) + "…"
+		}
+		banner := lipgloss.NewStyle().Foreground(m.pal.Bg).Background(m.pal.Red).Bold(true).
+			Width(m.width).Render(msg)
+		frame = overlay(frame, banner, 0, 1)
+	}
 	if m.paletteOpen {
 		frame = m.overlayPalette(frame)
 	}

@@ -19,8 +19,44 @@ func (m Model) View() string {
 		return lipgloss.NewStyle().Foreground(p.Dim).Render("onboarding needs at least 54×18 — resize the terminal.")
 	}
 	stageH := m.height - 2
-	stage := lipgloss.Place(m.width, stageH, lipgloss.Center, lipgloss.Center, m.stage(p))
+	block := m.stage(p)
+	var stage string
+	if m.phase == phaseWizard || m.phase == phaseLaunch {
+		stage = lipgloss.Place(m.width, stageH, lipgloss.Center, lipgloss.Center, block)
+	} else {
+		stage = m.bootPlace(block, stageH) // boot-family: full-bleed, left/top
+	}
 	return strings.Join([]string{m.titlebar(p), stage, m.statusbar(p)}, "\n")
+}
+
+// bootPlace lays a boot-family block at the top-left with a left margin, padded
+// to fill the stage height.
+func (m Model) bootPlace(block string, stageH int) string {
+	out := []string{"", ""} // top margin
+	for _, l := range strings.Split(block, "\n") {
+		out = append(out, "    "+l)
+	}
+	for len(out) < stageH {
+		out = append(out, "")
+	}
+	return strings.Join(out[:stageH], "\n")
+}
+
+// bootContentW is the text width for boot-family screens.
+func (m Model) bootContentW() int {
+	w := m.width - 12
+	if w > 74 {
+		w = 74
+	}
+	if w < 40 {
+		w = m.width - 8
+	}
+	return w
+}
+
+// bootScreen prepends the shared banner to a boot-family screen's content.
+func bootScreen(p theme.Palette, content string) string {
+	return banner(p) + "\n\n" + content
 }
 
 // panelDims returns the centered card's outer width/height. The wizard is wider
@@ -107,26 +143,27 @@ func padPlain(s string, w int) string {
 func (m Model) stage(p theme.Palette) string {
 	switch m.phase {
 	case phaseBoot:
-		return m.boot.render(p)
+		return bootScreen(p, m.boot.render(p))
 	case phaseOAuth:
-		return m.oauth.render(p)
+		return bootScreen(p, m.oauth.render(p))
 	case phaseAuth:
-		return m.frame(p, "sign in", "", m.viewAuth(p), "")
+		return bootScreen(p, m.viewAuth(p))
 	case phaseToken:
-		body := m.viewPrompt(p, "token", m.token.View(), []tline{
-			{"authenticate with an access token", "fg"},
-			{"paste a workspace token — begins with xoxp- or xoxb-.", "dim"},
-		}, "↵ continue · the token never leaves this machine")
-		return m.frame(p, "authenticate", "", body, "")
+		return bootScreen(p, m.viewLogin(p, "token:", m.token.View(), []tline{
+			{text: "authenticate with an access token", class: "fg"},
+			{text: "paste a workspace token — begins with xoxp- or xoxb-.", class: "dim"},
+		}, "paste your token, then press ↵ enter · it never leaves this machine"))
 	case phaseIdentity:
 		var lines []tline
 		if m.provider == "guest" {
-			lines = []tline{{"guest session", "fg"}, {"pick a display handle for this demo.", "dim"}}
+			lines = []tline{{text: "guest session — pick a display handle for this demo.", class: "dim"}}
 		} else {
-			lines = []tline{{"authenticated ✓  ·  @monospace-labs", "ok"}, {"choose how teammates will see you.", "dim"}}
+			lines = []tline{
+				{text: "authenticated ✓  ·  workspace @monospace-labs", class: "ok"},
+				{text: "choose how teammates will see you.", class: "dim"},
+			}
 		}
-		body := m.viewPrompt(p, "handle", m.handle.View(), lines, "↵ continue")
-		return m.frame(p, "identity", "", body, "")
+		return bootScreen(p, m.viewLogin(p, "display handle:", m.handle.View(), lines, "set your handle, then press ↵ enter to continue"))
 	case phaseWizard:
 		var body string
 		if m.step() == "keyboard" {
@@ -219,27 +256,61 @@ func (m Model) hints() [][2]string {
 	}
 }
 
-// ── auth ─────────────────────────────────────────────────────────────────────
+// ── auth (full-bleed bordered rows) ──────────────────────────────────────────
 
 func (m Model) viewAuth(p theme.Palette) string {
-	w := m.contentW()
-	head := lipgloss.NewStyle().Foreground(p.Fg).Bold(true).Render("Sign in to your workspace")
-	sub := wrapStyled(lipgloss.NewStyle().Foreground(p.Dim), "Choose how to authenticate.", w)
+	w := m.bootContentW()
+	ready := bootColor(p, "ok").Render("session ready.")
+	prompt := lipgloss.NewStyle().Foreground(p.Dim).Render("connect a workspace to continue, or pick another method.")
 
 	var rows []string
 	for i, o := range authOpts {
-		sel := i == m.authSel
-		key := lipgloss.NewStyle().Foreground(p.Dim2).Render(o.key)
-		mark := lipgloss.NewStyle().Foreground(authColor(p, o.id)).Bold(true).Render(o.mark)
-		labelColor := p.Dim
-		if sel {
-			labelColor = p.Fg
+		if i > 0 {
+			rows = append(rows, "")
 		}
-		label := lipgloss.NewStyle().Foreground(labelColor).Bold(o.primary).Render(o.label)
-		hint := lipgloss.NewStyle().Foreground(p.Dim2).Render(o.hint)
-		rows = append(rows, selRow(p, w, sel, key+"  "+mark+"  "+label, hint))
+		rows = append(rows, m.authRow(p, o, i == m.authSel, w))
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, head, sub, "", strings.Join(rows, "\n"))
+	return lipgloss.JoinVertical(lipgloss.Left, ready, "", prompt, "", lipgloss.JoinVertical(lipgloss.Left, rows...))
+}
+
+func (m Model) authRow(p theme.Palette, o authOpt, sel bool, w int) string {
+	contentW := w - 4 // border (2) + padding (2)
+
+	keyColor := p.Dim2
+	border := p.Border
+	if o.primary {
+		border = p.Dim2
+	}
+	if sel {
+		keyColor, border = p.Accent, p.Accent
+	}
+	key := lipgloss.NewStyle().Foreground(keyColor).Render("[" + o.key + "]")
+	mark := lipgloss.NewStyle().Foreground(authColor(p, o.id)).Render(o.mark)
+	labelColor := p.Dim
+	if sel {
+		labelColor = p.Fg
+	}
+	label := lipgloss.NewStyle().Foreground(labelColor).Bold(true).Render(o.label)
+	hint := lipgloss.NewStyle().Foreground(p.Dim2).Render(o.hint)
+	enter := " "
+	if sel {
+		enter = lipgloss.NewStyle().Foreground(p.Accent).Render("↵")
+	}
+
+	left := key + "  " + mark + "  " + label
+	right := hint + "  " + enter
+	gap := contentW - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		gap = 1
+	}
+	line := left + strings.Repeat(" ", gap) + right
+
+	box := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(border).
+		Width(w-2).Padding(0, 1)
+	if sel {
+		box = box.Background(p.SelBg)
+	}
+	return box.Render(line)
 }
 
 func authColor(p theme.Palette, id string) lipgloss.Color {
@@ -255,20 +326,18 @@ func authColor(p theme.Palette, id string) lipgloss.Color {
 	}
 }
 
-// ── prompt (token / identity) ────────────────────────────────────────────────
+// ── login (token / identity) ─────────────────────────────────────────────────
 
-func (m Model) viewPrompt(p theme.Palette, label, input string, lines []tline, hint string) string {
-	w := m.contentW()
+func (m Model) viewLogin(p theme.Palette, label, input string, lines []tline, hint string) string {
 	var head []string
 	for _, l := range lines {
 		head = append(head, m.tlineRender(p, l))
 	}
-	prefix := lipgloss.NewStyle().Foreground(p.Accent).Bold(true).Render("❯ ") +
-		lipgloss.NewStyle().Foreground(p.Dim).Render(label+" ")
-	field := lipgloss.NewStyle().Width(w - lipgloss.Width(prefix)).Background(p.SelBg).
-		Foreground(p.Fg).Render(input)
+	cursor := lipgloss.NewStyle().Foreground(p.Accent).Render("▋")
+	loginLine := lipgloss.NewStyle().Foreground(p.Green).Render(label+" ") +
+		lipgloss.NewStyle().Foreground(p.Fg).Render(input) + cursor
 	hintLine := lipgloss.NewStyle().Foreground(p.Dim2).Render(hint)
-	return lipgloss.JoinVertical(lipgloss.Left, strings.Join(head, "\n"), "", prefix+field, "", hintLine)
+	return lipgloss.JoinVertical(lipgloss.Left, strings.Join(head, "\n"), "", loginLine, "", hintLine)
 }
 
 func (m Model) tlineRender(p theme.Palette, l tline) string {

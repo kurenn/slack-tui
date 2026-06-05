@@ -34,8 +34,8 @@ func (m Model) viewTrainer(p theme.Palette, w int) string {
 	railLine := strings.Join(rail, lipgloss.NewStyle().Foreground(p.Dim2).Render("   "))
 	instr := wrapStyled(lipgloss.NewStyle().Foreground(p.Dim), drillInstr[t.drill], w)
 
-	// mini app box: box outer = innerW (w-4); content width after padding = innerW-2.
-	innerW := w - 4
+	// mini app box: sized for symmetric margins inside the card's content area.
+	innerW := w - 2
 	cw := innerW - 2
 	var lines []string
 	for i, mm := range miniMsgs {

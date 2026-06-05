@@ -94,10 +94,10 @@ func max0(n int) int {
 
 func bootLines() []tline {
 	return []tline{
-		{"   ┌────────────────────────────────┐", "fill"},
-		{"   │  s l a c k - t u i             │", "accent"},
-		{"   │  terminal workspace client     │", "dim"},
-		{"   └────────────────────────────────┘", "fill"},
+		{"┌──────────────────────────────────┐", "fill"},
+		{"│  s l a c k - t u i               │", "accent"},
+		{"│  terminal workspace client       │", "dim"},
+		{"└──────────────────────────────────┘", "fill"},
 		{"", "dim"},
 		{"initializing terminal core ......... ok", "ok"},
 		{"loading theme engine ............... ok", "ok"},

@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/abrahamkuri/slack-tui/internal/theme"
+	"github.com/abrahamkuri/slack-tui/internal/ui/pane"
 )
 
 func (m Model) View() string {
@@ -14,8 +15,8 @@ func (m Model) View() string {
 		return ""
 	}
 	p := m.pal()
-	if m.width < 50 || m.height < 16 {
-		return lipgloss.NewStyle().Foreground(p.Dim).Render("onboarding needs at least 50×16 — resize the terminal.")
+	if m.width < 54 || m.height < 18 {
+		return lipgloss.NewStyle().Foreground(p.Dim).Render("onboarding needs at least 54×18 — resize the terminal.")
 	}
 	stageH := m.height - 2
 	stage := lipgloss.Place(m.width, stageH, lipgloss.Center, lipgloss.Center, m.stage(p),
@@ -23,12 +24,57 @@ func (m Model) View() string {
 	return strings.Join([]string{m.titlebar(p), stage, m.statusbar(p)}, "\n")
 }
 
-func (m Model) stageW() int {
-	w := m.width - 6
-	if w > 72 {
-		w = 72
+// panelDims returns the centered card's outer width/height.
+func (m Model) panelDims() (int, int) {
+	pw := m.width - 8
+	if pw > 66 {
+		pw = 66
 	}
-	return w
+	if pw < 50 {
+		pw = m.width - 4
+	}
+	maxPH := 17
+	if m.phase == phaseWizard {
+		maxPH = 21 // the keyboard trainer step is the tallest
+	}
+	ph := m.height - 4
+	if ph > maxPH {
+		ph = maxPH
+	}
+	return pw, ph
+}
+
+// contentW is the usable text width inside the card (border + 2-space pad each side).
+func (m Model) contentW() int {
+	pw, _ := m.panelDims()
+	return pw - 6
+}
+
+// frame renders a fixed-size centered card: title (+ right label), body top-aligned
+// under a blank line, and footer pinned to the last row.
+func (m Model) frame(p theme.Palette, title, right, body, footer string) string {
+	pw, ph := m.panelDims()
+	innerW, innerH := pw-2, ph-2
+	pad := "  "
+
+	inner := make([]string, innerH)
+	row := 1 // one blank line of top padding
+	for _, l := range strings.Split(body, "\n") {
+		if row >= innerH-1 {
+			break
+		}
+		inner[row] = pad + l
+		row++
+	}
+	if footer != "" {
+		inner[innerH-1] = pad + footer
+	}
+	box := pane.Render(p, pane.Options{
+		Title: title, Right: right, Focused: true,
+		Width: pw, Height: ph, Body: strings.Join(inner, "\n"),
+	})
+	_ = innerW
+	return box
 }
 
 func (m Model) stage(p theme.Palette) string {
@@ -38,27 +84,32 @@ func (m Model) stage(p theme.Palette) string {
 	case phaseOAuth:
 		return m.oauth.render(p)
 	case phaseAuth:
-		return m.viewAuth(p)
+		return m.frame(p, "sign in", "", m.viewAuth(p), "")
 	case phaseToken:
-		return m.viewPrompt(p, "token:", m.token.View(), []tline{
-			{"[ token ] authenticate with an access token", "accent"},
-			{"paste a workspace token (begins with xoxp- or xoxb-).", "dim"},
-		}, "paste your token, then press ↵ enter · we never send it anywhere")
+		body := m.viewPrompt(p, "token", m.token.View(), []tline{
+			{"authenticate with an access token", "fg"},
+			{"paste a workspace token — begins with xoxp- or xoxb-.", "dim"},
+		}, "↵ continue · the token never leaves this machine")
+		return m.frame(p, "authenticate", "", body, "")
 	case phaseIdentity:
 		var lines []tline
 		if m.provider == "guest" {
-			lines = []tline{{"guest session — pick a display handle for this demo.", "dim"}}
+			lines = []tline{{"guest session", "fg"}, {"pick a display handle for this demo.", "dim"}}
 		} else {
-			lines = []tline{
-				{"authenticated ✓  ·  workspace @monospace-labs", "ok"},
-				{"choose how teammates will see you.", "dim"},
-			}
+			lines = []tline{{"authenticated ✓  ·  @monospace-labs", "ok"}, {"choose how teammates will see you.", "dim"}}
 		}
-		return m.viewPrompt(p, "display handle:", m.handle.View(), lines, "set your handle, then press ↵ enter to continue")
+		body := m.viewPrompt(p, "handle", m.handle.View(), lines, "↵ continue")
+		return m.frame(p, "identity", "", body, "")
 	case phaseWizard:
-		return m.viewWizard(p)
+		var body string
+		if m.step() == "keyboard" {
+			body = lipgloss.JoinVertical(lipgloss.Left, m.wizHeading(p), "", m.viewTrainer(p, m.contentW()))
+		} else {
+			body = m.viewWizardBody(p)
+		}
+		return m.frame(p, "setup", m.stepRail(p), body, m.viewFooter(p, m.contentW()))
 	case phaseLaunch:
-		return m.viewLaunch(p)
+		return m.frame(p, "ready", "", m.viewLaunch(p), m.viewLaunchFooter(p))
 	}
 	return ""
 }
@@ -96,15 +147,14 @@ func (m Model) statusbar(p theme.Palette) string {
 
 	loc := "@monospace-labs"
 	if m.phase == phaseWizard {
-		loc = fmt.Sprintf("step %d / %d", m.stepIndex+1, len(wizSteps))
+		loc = fmt.Sprintf("step %d / %d · %s", m.stepIndex+1, len(wizSteps), m.step())
 	} else if h := m.handle.Value(); h != "" && m.phase != phaseAuth && m.phase != phaseOAuth {
 		loc = "@" + h
 	}
 	locCell := bg.Foreground(p.Fg).Padding(0, 1).Render(loc)
 
-	hints := m.hints()
 	var hb strings.Builder
-	for _, h := range hints {
+	for _, h := range m.hints() {
 		hb.WriteString(bg.Foreground(p.Fg).Bold(true).Render(h[0]))
 		hb.WriteString(bg.Foreground(p.Dim).Render(" " + h[1] + "   "))
 	}
@@ -134,7 +184,7 @@ func (m Model) hints() [][2]string {
 			}
 			return h
 		}
-		h := [][2]string{{"j/k", "choose"}, {"1-9", "jump"}, {"↵", "next"}}
+		h := [][2]string{{"j/k", "choose"}, {"↵", "next"}}
 		if m.stepIndex > 0 {
 			h = append(h, [2]string{"esc", "back"})
 		}
@@ -145,36 +195,22 @@ func (m Model) hints() [][2]string {
 // ── auth ─────────────────────────────────────────────────────────────────────
 
 func (m Model) viewAuth(p theme.Palette) string {
-	w := m.stageW()
+	w := m.contentW()
 	head := lipgloss.NewStyle().Foreground(p.Fg).Bold(true).Render("Sign in to your workspace")
-	sub := lipgloss.NewStyle().Foreground(p.Dim).Render("Choose how to authenticate. Use j/k or 1–4, then ↵.")
+	sub := wrapStyled(lipgloss.NewStyle().Foreground(p.Dim), "Choose how to authenticate.", w)
 
 	var rows []string
 	for i, o := range authOpts {
 		sel := i == m.authSel
-		mark := lipgloss.NewStyle().Foreground(authColor(p, o.id)).Bold(true).Render(o.mark)
 		key := lipgloss.NewStyle().Foreground(p.Dim2).Render(o.key)
+		mark := lipgloss.NewStyle().Foreground(authColor(p, o.id)).Bold(true).Render(o.mark)
 		labelColor := p.Dim
 		if sel {
 			labelColor = p.Fg
 		}
 		label := lipgloss.NewStyle().Foreground(labelColor).Bold(o.primary).Render(o.label)
 		hint := lipgloss.NewStyle().Foreground(p.Dim2).Render(o.hint)
-		bar := "  "
-		if sel {
-			bar = lipgloss.NewStyle().Foreground(p.Accent).Render("▌") + " "
-		}
-		left := bar + key + "  " + mark + "  " + label
-		gap := w - lipgloss.Width(left) - lipgloss.Width(hint)
-		if gap < 1 {
-			gap = 1
-		}
-		line := left + strings.Repeat(" ", gap) + hint
-		bgc := p.Bg
-		if sel {
-			bgc = p.SelBg
-		}
-		rows = append(rows, lipgloss.NewStyle().Width(w).Background(bgc).Render(line))
+		rows = append(rows, selRow(p, w, sel, key+"  "+mark+"  "+label, hint))
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, head, sub, "", strings.Join(rows, "\n"))
 }
@@ -195,17 +231,17 @@ func authColor(p theme.Palette, id string) lipgloss.Color {
 // ── prompt (token / identity) ────────────────────────────────────────────────
 
 func (m Model) viewPrompt(p theme.Palette, label, input string, lines []tline, hint string) string {
-	w := m.stageW()
+	w := m.contentW()
 	var head []string
 	for _, l := range lines {
 		head = append(head, m.tlineRender(p, l))
 	}
-	prompt := lipgloss.NewStyle().Foreground(p.Accent).Bold(true).Render(label+" ") +
-		lipgloss.NewStyle().Foreground(p.Fg).Render(input)
-	box := lipgloss.NewStyle().Width(w).Foreground(p.Fg).
-		Border(lipgloss.NormalBorder()).BorderForeground(p.Accent).Padding(0, 1).Render(prompt)
+	prefix := lipgloss.NewStyle().Foreground(p.Accent).Bold(true).Render("❯ ") +
+		lipgloss.NewStyle().Foreground(p.Dim).Render(label+" ")
+	field := lipgloss.NewStyle().Width(w - lipgloss.Width(prefix)).Background(p.SelBg).
+		Foreground(p.Fg).Render(input)
 	hintLine := lipgloss.NewStyle().Foreground(p.Dim2).Render(hint)
-	return lipgloss.JoinVertical(lipgloss.Left, strings.Join(head, "\n"), "", box, "", hintLine)
+	return lipgloss.JoinVertical(lipgloss.Left, strings.Join(head, "\n"), "", prefix+field, "", hintLine)
 }
 
 func (m Model) tlineRender(p theme.Palette, l tline) string {
@@ -220,7 +256,7 @@ func (m Model) tlineRender(p theme.Palette, l tline) string {
 	case "dim":
 		s = s.Foreground(p.Dim)
 	default:
-		s = s.Foreground(p.Fg)
+		s = s.Foreground(p.Fg).Bold(true)
 	}
 	return s.Render(l.text)
 }
@@ -228,15 +264,49 @@ func (m Model) tlineRender(p theme.Palette, l tline) string {
 // ── launch ───────────────────────────────────────────────────────────────────
 
 func (m Model) viewLaunch(p theme.Palette) string {
-	mark := lipgloss.NewStyle().Foreground(p.Green).Render("✓ session configured — welcome aboard")
+	w := m.contentW()
+	mark := lipgloss.NewStyle().Foreground(p.Green).Render("✓ session configured")
 	head := lipgloss.NewStyle().Foreground(p.Fg).Bold(true).Render("You're all set, @" + orDefault(m.handle.Value(), "you"))
-	val := func(s string) string { return lipgloss.NewStyle().Foreground(p.Accent).Render(s) }
-	sep := lipgloss.NewStyle().Foreground(p.Dim2).Render(" · ")
-	sum := lipgloss.NewStyle().Foreground(p.Dim).Render(
-		val(themeName(m.themeName)) + " theme" + sep + val(accentName(m.accent)) + " accent" + sep +
-			val(m.density) + " density" + sep + val(statusLabel(m.status)))
+	row := func(k, v string) string {
+		return lipgloss.NewStyle().Foreground(p.Dim2).Width(10).Render(k) +
+			lipgloss.NewStyle().Foreground(p.Fg).Render(v)
+	}
+	summary := lipgloss.JoinVertical(lipgloss.Left,
+		row("theme", themeName(m.themeName)),
+		row("accent", accentName(m.accent)),
+		row("density", m.density),
+		row("status", statusLabel(m.status)),
+	)
+	_ = w
+	return lipgloss.JoinVertical(lipgloss.Left, mark, "", head, "", summary)
+}
+
+func (m Model) viewLaunchFooter(p theme.Palette) string {
 	cta := lipgloss.NewStyle().Background(p.Accent).Foreground(p.Bg).Bold(true).Padding(0, 2).Render("enter workspace ↵")
-	return lipgloss.JoinVertical(lipgloss.Center, mark, "", head, "", sum, "", cta)
+	w := m.contentW()
+	gap := w - lipgloss.Width(cta)
+	if gap < 0 {
+		gap = 0
+	}
+	return strings.Repeat(" ", gap) + cta
+}
+
+// selRow renders a selectable list row: a leading cursor bar, left content, and
+// a right-aligned meta, filled to width w with the selection background.
+func selRow(p theme.Palette, w int, selected bool, left, right string) string {
+	bar := "  "
+	bgc := p.Bg
+	if selected {
+		bar = lipgloss.NewStyle().Foreground(p.Accent).Render("▌") + " "
+		bgc = p.SelBg
+	}
+	lead := bar + left
+	gap := w - lipgloss.Width(lead) - lipgloss.Width(right)
+	if gap < 1 {
+		gap = 1
+	}
+	line := lead + strings.Repeat(" ", gap) + right
+	return lipgloss.NewStyle().Width(w).Background(bgc).Render(line)
 }
 
 func themeName(v string) string {

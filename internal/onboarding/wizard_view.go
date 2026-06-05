@@ -1,6 +1,7 @@
 package onboarding
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -13,33 +14,56 @@ var stepKicker = map[string]string{
 	"keyboard": "tutorial · 04", "status": "presence · 05",
 }
 var stepHead = map[string][2]string{
-	"theme":    {"Choose a theme", "Pick the palette for your workspace — the whole client follows your choice. j/k previews each live."},
-	"accent":   {"Accent color", "The accent highlights the focused pane, your cursor, the mode bar, and selections."},
+	"theme":    {"Choose a theme", "The whole client follows your choice. j/k previews each live."},
+	"accent":   {"Accent color", "Highlights the focused pane, your cursor, and selections."},
 	"density":  {"Message density", "How tightly messages pack into the pane."},
-	"keyboard": {"Learn the keys", "slack-tui is modal, like vim — NORMAL navigates, INSERT types. Clear each drill."},
-	"status":   {"Set your presence", "How teammates see you. Change it anytime from the command palette (⌃K)."},
+	"keyboard": {"Learn the keys", "Modal, like vim — NORMAL navigates, INSERT types. Clear each drill."},
+	"status":   {"Set your presence", "How teammates see you — change it anytime from ⌃K."},
 }
 
-func (m Model) viewWizard(p theme.Palette) string {
-	w := m.stageW()
-	step := m.step()
-
-	rule := lipgloss.NewStyle().Foreground(p.Dim).Render("setup  ") + m.stepRail(p)
-	kicker := lipgloss.NewStyle().Foreground(p.Dim2).Render(stepKicker[step])
-	hd := stepHead[step]
+// wizHeading is the shared kicker + title + subtitle block for a wizard step.
+func (m Model) wizHeading(p theme.Palette) string {
+	w := m.contentW()
+	hd := stepHead[m.step()]
+	kicker := lipgloss.NewStyle().Foreground(p.Dim2).Render(stepKicker[m.step()])
 	head := lipgloss.NewStyle().Foreground(p.Fg).Bold(true).Render(hd[0])
 	sub := wrapStyled(lipgloss.NewStyle().Foreground(p.Dim), hd[1], w)
+	return lipgloss.JoinVertical(lipgloss.Left, kicker, head, sub)
+}
 
-	var body string
-	switch step {
-	case "theme", "accent", "density", "status":
-		body = m.viewOptions(p, w)
-	case "keyboard":
-		body = m.viewTrainer(p, w)
+func (m Model) viewWizardBody(p theme.Palette) string {
+	return lipgloss.JoinVertical(lipgloss.Left, m.wizHeading(p), "", m.viewOptions(p, m.contentW()))
+}
+
+func (m Model) viewOptions(p theme.Palette, w int) string {
+	num := func(i int) string { return lipgloss.NewStyle().Foreground(p.Dim2).Render(fmt.Sprintf("%d ", i+1)) }
+	var rows []string
+	switch m.step() {
+	case "theme":
+		for i, o := range themeOpts {
+			name := lipgloss.NewStyle().Foreground(p.Fg).Width(11).Render(o.name)
+			rows = append(rows, selRow(p, w, i == m.optSel, num(i)+name+swatch(o.val), ""))
+		}
+	case "accent":
+		for i, o := range accentOpts {
+			rows = append(rows, selRow(p, w, i == m.optSel, num(i)+chip(p, o.val)+" "+lipgloss.NewStyle().Foreground(p.Fg).Render(o.name), ""))
+		}
+	case "density":
+		desc := map[string]string{"compact": "fits more on screen", "comfortable": "more room to breathe"}
+		for i, o := range densityOpts {
+			name := lipgloss.NewStyle().Foreground(p.Fg).Width(13).Render(o.name)
+			d := lipgloss.NewStyle().Foreground(p.Dim2).Render(desc[o.val])
+			rows = append(rows, selRow(p, w, i == m.optSel, num(i)+name+d, ""))
+		}
+	case "status":
+		for i, o := range statusOpts {
+			dot := lipgloss.NewStyle().Foreground(presenceColor(p, o.val)).Render("● ")
+			name := lipgloss.NewStyle().Foreground(p.Fg).Width(15).Render(o.label)
+			d := lipgloss.NewStyle().Foreground(p.Dim2).Render(o.desc)
+			rows = append(rows, selRow(p, w, i == m.optSel, num(i)+dot+name+d, ""))
+		}
 	}
-
-	footer := m.viewFooter(p, w)
-	return lipgloss.JoinVertical(lipgloss.Left, rule, "", kicker, head, sub, "", body, "", footer)
+	return strings.Join(rows, "\n")
 }
 
 func (m Model) stepRail(p theme.Palette) string {
@@ -53,62 +77,14 @@ func (m Model) stepRail(p theme.Palette) string {
 			}
 			b.WriteString(lipgloss.NewStyle().Foreground(c).Render("──"))
 		}
-		glyph := "○"
-		c := p.Dim2
-		if i < m.stepIndex {
-			glyph, c = "◉", p.Accent
-		} else if i == m.stepIndex {
+		glyph, c := "○", p.Dim2
+		if i <= m.stepIndex {
 			glyph, c = "◉", p.Accent
 		}
 		b.WriteString(lipgloss.NewStyle().Foreground(c).Render(glyph))
 	}
 	b.WriteString(lipgloss.NewStyle().Foreground(p.Dim2).Render("]"))
 	return b.String()
-}
-
-func (m Model) viewOptions(p theme.Palette, w int) string {
-	var rows []string
-	switch m.step() {
-	case "theme":
-		for i, o := range themeOpts {
-			name := lipgloss.NewStyle().Width(11).Render(o.name)
-			rows = append(rows, optRow(p, w, i == m.optSel, i+1, name+swatch(o.val)))
-		}
-	case "accent":
-		for i, o := range accentOpts {
-			rows = append(rows, optRow(p, w, i == m.optSel, i+1, chip(p, o.val)+" "+o.name))
-		}
-	case "density":
-		desc := map[string]string{"compact": "fits more on screen", "comfortable": "more room to breathe"}
-		for i, o := range densityOpts {
-			content := o.name + lipgloss.NewStyle().Foreground(p.Dim2).Render("  — "+desc[o.val])
-			rows = append(rows, optRow(p, w, i == m.optSel, i+1, content))
-		}
-	case "status":
-		for i, o := range statusOpts {
-			dot := lipgloss.NewStyle().Foreground(presenceColor(p, o.val)).Render("●")
-			content := dot + "  " + o.label + lipgloss.NewStyle().Foreground(p.Dim2).Render("  — "+o.desc)
-			rows = append(rows, optRow(p, w, i == m.optSel, i+1, content))
-		}
-	}
-	return strings.Join(rows, "\n")
-}
-
-// optRow renders a selectable wizard row with a leading number and selection bar.
-func optRow(p theme.Palette, w int, selected bool, number int, content string) string {
-	num := lipgloss.NewStyle().Foreground(p.Dim2).Render(itoa(number))
-	check := "  "
-	if selected {
-		check = lipgloss.NewStyle().Foreground(p.Accent).Render("◉ ")
-	}
-	bar := "  "
-	bgc := p.Bg
-	if selected {
-		bar = lipgloss.NewStyle().Foreground(p.Accent).Render("▌") + " "
-		bgc = p.SelBg
-	}
-	line := bar + num + " " + check + content
-	return lipgloss.NewStyle().Width(w).Background(bgc).Render(padRightTo(line, w))
 }
 
 // swatch renders a theme's 5-color preview strip.
@@ -148,10 +124,11 @@ func (m Model) viewFooter(p theme.Palette, w int) string {
 	if m.stepIndex == len(wizSteps)-1 {
 		label = "finish ↵"
 	}
-	disabled := m.step() == "keyboard" && !m.kbDone
-	cont := lipgloss.NewStyle().Background(p.Accent).Foreground(p.Bg).Bold(true).Padding(0, 1).Render(label)
-	if disabled {
+	var cont string
+	if m.step() == "keyboard" && !m.kbDone {
 		cont = lipgloss.NewStyle().Foreground(p.Dim2).Render("complete the drills to continue")
+	} else {
+		cont = lipgloss.NewStyle().Background(p.Accent).Foreground(p.Bg).Bold(true).Padding(0, 1).Render(label)
 	}
 	gap := w - lipgloss.Width(back) - lipgloss.Width(cont)
 	if gap < 1 {
@@ -173,29 +150,6 @@ func presenceColor(p theme.Palette, status string) lipgloss.Color {
 	}
 }
 
-// ── small text utils ─────────────────────────────────────────────────────────
-
 func wrapStyled(s lipgloss.Style, text string, w int) string {
 	return s.Width(w).Render(text)
-}
-
-func padRightTo(s string, w int) string {
-	if d := w - lipgloss.Width(s); d > 0 {
-		return s + strings.Repeat(" ", d)
-	}
-	return s
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b [4]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(b[i:])
 }

@@ -46,6 +46,8 @@ func Goto(m Model, target string) Model {
 	}
 	m.handle.SetValue("devon")
 	switch phase {
+	case phaseBoot:
+		m.boot.fastForward()
 	case phaseOAuth:
 		m.oauth = newTypewriter(oauthLines("slack"))
 		m.oauth.fastForward()

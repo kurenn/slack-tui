@@ -5,9 +5,9 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/abrahamkuri/slack-tui/internal/theme"
-	"github.com/abrahamkuri/slack-tui/internal/ui/pane"
 )
 
 func (m Model) View() string {
@@ -19,27 +19,27 @@ func (m Model) View() string {
 		return lipgloss.NewStyle().Foreground(p.Dim).Render("onboarding needs at least 54×18 — resize the terminal.")
 	}
 	stageH := m.height - 2
-	stage := lipgloss.Place(m.width, stageH, lipgloss.Center, lipgloss.Center, m.stage(p),
-		lipgloss.WithWhitespaceBackground(p.Bg))
+	stage := lipgloss.Place(m.width, stageH, lipgloss.Center, lipgloss.Center, m.stage(p))
 	return strings.Join([]string{m.titlebar(p), stage, m.statusbar(p)}, "\n")
 }
 
-// panelDims returns the centered card's outer width/height.
+// panelDims returns the centered card's outer width/height. The wizard is wider
+// to fit the card grids; the other phases use a slimmer column.
 func (m Model) panelDims() (int, int) {
+	maxW, maxH := 66, 17
+	if m.phase == phaseWizard {
+		maxW, maxH = 104, 24
+	}
 	pw := m.width - 8
-	if pw > 66 {
-		pw = 66
+	if pw > maxW {
+		pw = maxW
 	}
 	if pw < 50 {
 		pw = m.width - 4
 	}
-	maxPH := 17
-	if m.phase == phaseWizard {
-		maxPH = 21 // the keyboard trainer step is the tallest
-	}
 	ph := m.height - 4
-	if ph > maxPH {
-		ph = maxPH
+	if ph > maxH {
+		ph = maxH
 	}
 	return pw, ph
 }
@@ -50,12 +50,29 @@ func (m Model) contentW() int {
 	return pw - 6
 }
 
-// frame renders a fixed-size centered card: title (+ right label), body top-aligned
-// under a blank line, and footer pinned to the last row.
+// frame renders a fixed-size centered card with a thin dim border and a flat
+// (transparent) interior — matching the design. Title is accent; an optional
+// right label (e.g. the step rail) sits on the top rule. Body is top-aligned
+// under a blank line; footer is pinned to the bottom row.
 func (m Model) frame(p theme.Palette, title, right, body, footer string) string {
 	pw, ph := m.panelDims()
 	innerW, innerH := pw-2, ph-2
-	pad := "  "
+	bs := lipgloss.NewStyle().Foreground(p.Dim2)
+	ts := lipgloss.NewStyle().Foreground(p.Accent).Bold(true)
+
+	// top rule: ┌─ title ─────── right ─┐
+	fill := innerW - (3 + lipgloss.Width(title))
+	if right != "" {
+		fill -= 3 + lipgloss.Width(right)
+	}
+	if fill < 0 {
+		fill = 0
+	}
+	top := bs.Render("┌─ ") + ts.Render(title) + bs.Render(" ") + bs.Render(strings.Repeat("─", fill))
+	if right != "" {
+		top += bs.Render(" ") + right + bs.Render(" ─")
+	}
+	top += bs.Render("┐")
 
 	inner := make([]string, innerH)
 	row := 1 // one blank line of top padding
@@ -63,18 +80,28 @@ func (m Model) frame(p theme.Palette, title, right, body, footer string) string 
 		if row >= innerH-1 {
 			break
 		}
-		inner[row] = pad + l
+		inner[row] = "  " + l
 		row++
 	}
 	if footer != "" {
-		inner[innerH-1] = pad + footer
+		inner[innerH-1] = "  " + footer
 	}
-	box := pane.Render(p, pane.Options{
-		Title: title, Right: right, Focused: true,
-		Width: pw, Height: ph, Body: strings.Join(inner, "\n"),
-	})
-	_ = innerW
-	return box
+
+	var b strings.Builder
+	b.WriteString(top + "\n")
+	for _, l := range inner {
+		b.WriteString(bs.Render("│") + padPlain(l, innerW) + bs.Render("│") + "\n")
+	}
+	b.WriteString(bs.Render("└" + strings.Repeat("─", innerW) + "┘"))
+	return b.String()
+}
+
+// padPlain pads s to width w with plain (no-background) spaces, truncating if needed.
+func padPlain(s string, w int) string {
+	if d := w - lipgloss.Width(s); d > 0 {
+		return s + strings.Repeat(" ", d)
+	}
+	return ansi.Truncate(s, w, "")
 }
 
 func (m Model) stage(p theme.Palette) string {
@@ -291,22 +318,19 @@ func (m Model) viewLaunchFooter(p theme.Palette) string {
 	return strings.Repeat(" ", gap) + cta
 }
 
-// selRow renders a selectable list row: a leading cursor bar, left content, and
-// a right-aligned meta, filled to width w with the selection background.
+// selRow renders a selectable list row: a leading accent cursor bar, left
+// content, and a right-aligned meta. Flat — no background fill.
 func selRow(p theme.Palette, w int, selected bool, left, right string) string {
 	bar := "  "
-	bgc := p.Bg
 	if selected {
 		bar = lipgloss.NewStyle().Foreground(p.Accent).Render("▌") + " "
-		bgc = p.SelBg
 	}
 	lead := bar + left
 	gap := w - lipgloss.Width(lead) - lipgloss.Width(right)
 	if gap < 1 {
 		gap = 1
 	}
-	line := lead + strings.Repeat(" ", gap) + right
-	return lipgloss.NewStyle().Width(w).Background(bgc).Render(line)
+	return lead + strings.Repeat(" ", gap) + right
 }
 
 func themeName(v string) string {

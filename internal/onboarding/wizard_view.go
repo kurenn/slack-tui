@@ -36,34 +36,209 @@ func (m Model) viewWizardBody(p theme.Palette) string {
 }
 
 func (m Model) viewOptions(p theme.Palette, w int) string {
-	num := func(i int) string { return lipgloss.NewStyle().Foreground(p.Dim2).Render(fmt.Sprintf("%d ", i+1)) }
-	var rows []string
 	switch m.step() {
 	case "theme":
-		for i, o := range themeOpts {
-			name := lipgloss.NewStyle().Foreground(p.Fg).Width(11).Render(o.name)
-			rows = append(rows, selRow(p, w, i == m.optSel, num(i)+name+swatch(o.val), ""))
-		}
+		return m.themeCards(p, w)
 	case "accent":
-		for i, o := range accentOpts {
-			rows = append(rows, selRow(p, w, i == m.optSel, num(i)+chip(p, o.val)+" "+lipgloss.NewStyle().Foreground(p.Fg).Render(o.name), ""))
-		}
+		return m.accentCards(p, w)
 	case "density":
-		desc := map[string]string{"compact": "fits more on screen", "comfortable": "more room to breathe"}
-		for i, o := range densityOpts {
-			name := lipgloss.NewStyle().Foreground(p.Fg).Width(13).Render(o.name)
-			d := lipgloss.NewStyle().Foreground(p.Dim2).Render(desc[o.val])
-			rows = append(rows, selRow(p, w, i == m.optSel, num(i)+name+d, ""))
-		}
+		return m.densityCards(p, w)
 	case "status":
-		for i, o := range statusOpts {
-			dot := lipgloss.NewStyle().Foreground(presenceColor(p, o.val)).Render("● ")
-			name := lipgloss.NewStyle().Foreground(p.Fg).Width(15).Render(o.label)
-			d := lipgloss.NewStyle().Foreground(p.Dim2).Render(o.desc)
-			rows = append(rows, selRow(p, w, i == m.optSel, num(i)+dot+name+d, ""))
+		return m.statusList(p, w)
+	}
+	return ""
+}
+
+// ── theme: 3-column grid of cards, each with a header and a swatch strip ──────
+
+func (m Model) themeCards(p theme.Palette, w int) string {
+	var cards []string
+	for i, o := range themeOpts {
+		cards = append(cards, m.themeCard(p, i, o.name, o.val, i == m.optSel))
+	}
+	return cardGrid(cards, 3, cardInner(w, 3))
+}
+
+func (m Model) themeCard(p theme.Palette, i int, name, val string, sel bool) string {
+	inner := cardInner(m.contentW(), 3)
+	header := cardHeader(p, i, name, sel, inner)
+	swatch := swatchStrip([]lipgloss.Color{
+		theme.Resolve(val, "auto").Blue, theme.Resolve(val, "auto").Green,
+		theme.Resolve(val, "auto").Purple, theme.Resolve(val, "auto").Orange,
+	}, inner, 3)
+	return cardBox(p, sel, inner, header+"\n"+swatch)
+}
+
+// ── accent: 3-column grid of chip cards ──────────────────────────────────────
+
+func (m Model) accentCards(p theme.Palette, w int) string {
+	var cards []string
+	inner := cardInner(w, 3)
+	for i, o := range accentOpts {
+		header := cardHeader(p, i, o.name, i == m.optSel, inner)
+		swatch := swatchStrip([]lipgloss.Color{accentColor(p, o.val)}, inner, 2)
+		cards = append(cards, cardBox(p, i == m.optSel, inner, header+"\n"+swatch))
+	}
+	return cardGrid(cards, 3, inner)
+}
+
+func accentColor(p theme.Palette, val string) lipgloss.Color {
+	switch val {
+	case "cyan":
+		return lipgloss.Color("#56d4dd")
+	case "green":
+		return lipgloss.Color("#7ee787")
+	case "purple":
+		return lipgloss.Color("#c8a2ff")
+	case "orange":
+		return lipgloss.Color("#f0a868")
+	case "magenta":
+		return lipgloss.Color("#ff7bd5")
+	default:
+		return p.Accent
+	}
+}
+
+// ── density: 2 cards with a mini message demo ────────────────────────────────
+
+func (m Model) densityCards(p theme.Palette, w int) string {
+	inner := cardInner(w, 2)
+	demo := func(gap bool) string {
+		var rows []string
+		for j, u := range []struct{ name, color string }{{"ada.k", "purple"}, {"lin.z", "green"}, {"marco", "orange"}} {
+			t := lipgloss.NewStyle().Foreground(p.Dim2).Render(fmt.Sprintf("09:2%d ", j))
+			n := lipgloss.NewStyle().Foreground(p.Token(u.color)).Bold(true).Render(u.name)
+			rows = append(rows, t+n+lipgloss.NewStyle().Foreground(p.Dim).Render(" short message"))
+			if gap {
+				rows = append(rows, "")
+			}
+		}
+		return strings.Join(rows, "\n")
+	}
+	contents := make([]string, len(densityOpts))
+	maxLines := 0
+	for i, o := range densityOpts {
+		contents[i] = cardHeader(p, i, o.name, i == m.optSel, inner) + "\n\n" + demo(o.val == "comfortable")
+		if n := strings.Count(contents[i], "\n"); n > maxLines {
+			maxLines = n
 		}
 	}
+	var cards []string
+	for i := range densityOpts {
+		body := contents[i] + strings.Repeat("\n", maxLines-strings.Count(contents[i], "\n"))
+		cards = append(cards, cardBox(p, i == m.optSel, inner, body))
+	}
+	return cardGrid(cards, 2, inner)
+}
+
+// ── status: a clean presence list ────────────────────────────────────────────
+
+func (m Model) statusList(p theme.Palette, w int) string {
+	var rows []string
+	for i, o := range statusOpts {
+		dot := lipgloss.NewStyle().Foreground(presenceColor(p, o.val)).Render("● ")
+		name := lipgloss.NewStyle().Foreground(p.Fg).Bold(true).Width(16).Render(o.label)
+		d := lipgloss.NewStyle().Foreground(p.Dim2).Render(o.desc)
+		num := lipgloss.NewStyle().Foreground(p.Dim2).Render(fmt.Sprintf("%d ", i+1))
+		rows = append(rows, "", selRow(p, w, i == m.optSel, num+dot+name+d, ""))
+	}
 	return strings.Join(rows, "\n")
+}
+
+// ── card primitives ──────────────────────────────────────────────────────────
+
+// cardInner returns the inner width of one card given total width and column count.
+func cardInner(w, cols int) int {
+	gap := 2
+	return (w-gap*(cols-1))/cols - 2 // -2 for the card border
+}
+
+func cardHeader(p theme.Palette, i int, name string, sel bool, inner int) string {
+	num := keycap(p, fmt.Sprintf("%d", i+1))
+	nm := lipgloss.NewStyle().Foreground(p.Fg).Bold(true).Render(name)
+	left := num + " " + nm
+	check := " "
+	if sel {
+		check = lipgloss.NewStyle().Foreground(p.Accent).Render("◉")
+	}
+	gap := inner - lipgloss.Width(left) - 1
+	if gap < 1 {
+		gap = 1
+	}
+	return left + strings.Repeat(" ", gap) + check
+}
+
+// keycap renders a small "key" chip on a faint background, echoing the design's
+// boxed option numbers.
+func keycap(p theme.Palette, s string) string {
+	return lipgloss.NewStyle().Foreground(p.Dim).Background(p.SelBg).Padding(0, 1).Render(s)
+}
+
+func cardBox(p theme.Palette, sel bool, inner int, content string) string {
+	border := p.Border
+	if sel {
+		border = p.Accent
+	}
+	return lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(border).
+		Width(inner).Render(content)
+}
+
+// swatchStrip renders `rows` rows of solid color blocks filling width w.
+func swatchStrip(cols []lipgloss.Color, w, rows int) string {
+	widths := distribute(w, len(cols))
+	var row strings.Builder
+	for j, c := range cols {
+		row.WriteString(lipgloss.NewStyle().Background(c).Render(strings.Repeat(" ", widths[j])))
+	}
+	line := row.String()
+	out := make([]string, rows)
+	for i := range out {
+		out[i] = line
+	}
+	return strings.Join(out, "\n")
+}
+
+// cardGrid arranges cards into rows of `cols`, separated by a blank line.
+func cardGrid(cards []string, cols, inner int) string {
+	var rows []string
+	for i := 0; i < len(cards); i += cols {
+		end := i + cols
+		if end > len(cards) {
+			end = len(cards)
+		}
+		var seg []string
+		for j := i; j < end; j++ {
+			if j > i {
+				seg = append(seg, "  ")
+			}
+			seg = append(seg, cards[j])
+		}
+		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, seg...))
+	}
+	// interleave a blank line between card rows
+	var out []string
+	for i, r := range rows {
+		if i > 0 {
+			out = append(out, "")
+		}
+		out = append(out, r)
+	}
+	return strings.Join(out, "\n")
+}
+
+func distribute(w, n int) []int {
+	if n <= 0 {
+		return nil
+	}
+	base, rem := w/n, w%n
+	out := make([]int, n)
+	for i := range out {
+		out[i] = base
+		if i < rem {
+			out[i]++
+		}
+	}
+	return out
 }
 
 func (m Model) stepRail(p theme.Palette) string {
@@ -85,34 +260,6 @@ func (m Model) stepRail(p theme.Palette) string {
 	}
 	b.WriteString(lipgloss.NewStyle().Foreground(p.Dim2).Render("]"))
 	return b.String()
-}
-
-// swatch renders a theme's 5-color preview strip.
-func swatch(themeVal string) string {
-	tp := theme.Resolve(themeVal, "auto")
-	cols := []lipgloss.Color{tp.Bg, tp.Blue, tp.Green, tp.Purple, tp.Orange}
-	var b strings.Builder
-	for _, c := range cols {
-		b.WriteString(lipgloss.NewStyle().Foreground(c).Render("██"))
-	}
-	return b.String()
-}
-
-func chip(p theme.Palette, accentVal string) string {
-	c := p.Accent
-	switch accentVal {
-	case "cyan":
-		c = lipgloss.Color("#56d4dd")
-	case "green":
-		c = lipgloss.Color("#7ee787")
-	case "purple":
-		c = lipgloss.Color("#c8a2ff")
-	case "orange":
-		c = lipgloss.Color("#f0a868")
-	case "magenta":
-		c = lipgloss.Color("#ff7bd5")
-	}
-	return lipgloss.NewStyle().Foreground(c).Render("██")
 }
 
 func (m Model) viewFooter(p theme.Palette, w int) string {

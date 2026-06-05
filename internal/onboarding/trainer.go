@@ -49,7 +49,7 @@ type trainerState struct {
 func newTrainer() trainerState {
 	ti := textinput.New()
 	ti.Prompt = ""
-	return trainerState{mode: "normal", mini: ti, sel: len(miniMsgs) - 1}
+	return trainerState{mode: "normal", mini: ti, sel: 0}
 }
 
 // needsEsc reports whether the trainer must consume Esc for the current drill

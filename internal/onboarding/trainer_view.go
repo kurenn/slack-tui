@@ -188,7 +188,11 @@ func (m Model) miniMessage(p theme.Palette, t trainerState, i int, mm miniMsg, w
 
 	tm := lipgloss.NewStyle().Foreground(p.Dim2).Width(gutter).Render(mm.time)
 	user := lipgloss.NewStyle().Foreground(p.Token(mm.color)).Bold(true).Render(mm.user + " ")
-	head := tm + user + miniText(p, mm.text)
+	body := miniText(p, mm.text)
+	if mm.react != "" {
+		body += "  " + lipgloss.NewStyle().Foreground(p.Dim).Render(mm.react)
+	}
+	head := tm + user + body
 
 	var lines []string
 	for _, l := range strings.Split(lipgloss.NewStyle().Width(w-1).Render(head), "\n") {
@@ -198,11 +202,8 @@ func (m Model) miniMessage(p theme.Palette, t trainerState, i int, mm miniMsg, w
 	if i == 0 && t.sent {
 		replies++
 	}
-	if mm.react != "" {
-		lines = append(lines, strings.Repeat(" ", gutter)+lipgloss.NewStyle().Background(p.SelBg).Render(" "+mm.react+" "))
-	}
 	if replies > 0 {
-		aff := lipgloss.NewStyle().Foreground(p.Dim).Render("└─ ") +
+		aff := lipgloss.NewStyle().Foreground(p.Dim).Render("└ ") +
 			lipgloss.NewStyle().Foreground(p.Accent).Render(fmt.Sprintf("%d replies", replies))
 		if t.drill == 2 && !t.threadOpen {
 			aff += lipgloss.NewStyle().Foreground(p.Dim2).Render("  ↵ press t")

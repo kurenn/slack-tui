@@ -192,7 +192,7 @@ func (m Model) stage(p theme.Palette) string {
 		}
 		return m.frame(p, "setup", m.stepRail(p), body, m.viewFooter(p, m.contentW()))
 	case phaseLaunch:
-		return m.frame(p, "ready", "", m.viewLaunch(p), m.viewLaunchFooter(p))
+		return m.viewLaunch(p)
 	}
 	return ""
 }
@@ -378,32 +378,21 @@ func (m Model) tlineRender(p theme.Palette, l tline) string {
 
 // ── launch ───────────────────────────────────────────────────────────────────
 
+// viewLaunch is the full-bleed, centered finale (no card): a green confirmation,
+// the heading, an inline preference summary, and the enter-workspace CTA.
 func (m Model) viewLaunch(p theme.Palette) string {
-	w := m.contentW()
-	mark := lipgloss.NewStyle().Foreground(p.Green).Render("✓ session configured")
+	mark := lipgloss.NewStyle().Foreground(p.Green).Render("✓ session configured — welcome aboard")
 	head := lipgloss.NewStyle().Foreground(p.Fg).Bold(true).Render("You're all set, @" + orDefault(m.handle.Value(), "you"))
-	row := func(k, v string) string {
-		return lipgloss.NewStyle().Foreground(p.Dim2).Width(10).Render(k) +
-			lipgloss.NewStyle().Foreground(p.Fg).Render(v)
-	}
-	summary := lipgloss.JoinVertical(lipgloss.Left,
-		row("theme", themeName(m.themeName)),
-		row("accent", accentName(m.accent)),
-		row("density", m.density),
-		row("status", statusLabel(m.status)),
-	)
-	_ = w
-	return lipgloss.JoinVertical(lipgloss.Left, mark, "", head, "", summary)
-}
 
-func (m Model) viewLaunchFooter(p theme.Palette) string {
-	cta := lipgloss.NewStyle().Background(p.Accent).Foreground(p.Bg).Bold(true).Padding(0, 2).Render("enter workspace ↵")
-	w := m.contentW()
-	gap := w - lipgloss.Width(cta)
-	if gap < 0 {
-		gap = 0
-	}
-	return strings.Repeat(" ", gap) + cta
+	val := func(s string) string { return lipgloss.NewStyle().Foreground(p.Fg).Bold(true).Render(s) }
+	lbl := func(s string) string { return lipgloss.NewStyle().Foreground(p.Dim).Render(s) }
+	sep := lipgloss.NewStyle().Foreground(p.Dim2).Render(" · ")
+	summary := val(themeName(m.themeName)) + " " + lbl("theme") + sep +
+		val(accentName(m.accent)) + " " + lbl("accent") + sep +
+		val(m.density) + " " + lbl("density") + sep + val(statusLabel(m.status))
+
+	cta := lipgloss.NewStyle().Background(p.Accent).Foreground(p.Bg).Bold(true).Padding(0, 3).Render("enter workspace ↵")
+	return lipgloss.JoinVertical(lipgloss.Center, mark, "", head, "", summary, "", "", cta)
 }
 
 // selRow renders a selectable list row: a leading accent cursor bar, left

@@ -75,9 +75,19 @@ func (m Model) accentCards(p theme.Palette, w int) string {
 	var cards []string
 	inner := cardInner(w, 3)
 	for i, o := range accentOpts {
-		header := cardHeader(p, i, o.name, i == m.optSel, inner)
-		swatch := swatchStrip([]lipgloss.Color{accentColor(p, o.val)}, inner, 2)
-		cards = append(cards, cardBox(p, i == m.optSel, inner, header+"\n"+swatch))
+		num := keycap(p, fmt.Sprintf("%d", i+1))
+		chip := lipgloss.NewStyle().Foreground(accentColor(p, o.val)).Render("●")
+		name := lipgloss.NewStyle().Foreground(p.Fg).Bold(true).Render(o.name)
+		left := num + " " + chip + " " + name
+		check := " "
+		if i == m.optSel {
+			check = lipgloss.NewStyle().Foreground(p.Accent).Render("◉")
+		}
+		gap := inner - lipgloss.Width(left) - 1
+		if gap < 1 {
+			gap = 1
+		}
+		cards = append(cards, cardBox(p, i == m.optSel, inner, left+strings.Repeat(" ", gap)+check))
 	}
 	return cardGrid(cards, 3, inner)
 }
@@ -136,13 +146,33 @@ func (m Model) densityCards(p theme.Palette, w int) string {
 func (m Model) statusList(p theme.Palette, w int) string {
 	var rows []string
 	for i, o := range statusOpts {
-		dot := lipgloss.NewStyle().Foreground(presenceColor(p, o.val)).Render("● ")
-		name := lipgloss.NewStyle().Foreground(p.Fg).Bold(true).Width(16).Render(o.label)
-		d := lipgloss.NewStyle().Foreground(p.Dim2).Render(o.desc)
-		num := lipgloss.NewStyle().Foreground(p.Dim2).Render(fmt.Sprintf("%d ", i+1))
-		rows = append(rows, "", selRow(p, w, i == m.optSel, num+dot+name+d, ""))
+		if i > 0 {
+			rows = append(rows, "")
+		}
+		rows = append(rows, m.statusRow(p, i, o.val, o.label, o.desc, i == m.optSel, w))
 	}
 	return strings.Join(rows, "\n")
+}
+
+func (m Model) statusRow(p theme.Palette, i int, val, label, desc string, sel bool, w int) string {
+	dot := lipgloss.NewStyle().Foreground(presenceColor(p, val)).Render("●")
+	name := lipgloss.NewStyle().Foreground(p.Fg).Bold(true).Render(label)
+	d := lipgloss.NewStyle().Foreground(p.Dim).Render(desc)
+	key := keycap(p, fmt.Sprintf("%d", i+1))
+
+	left := dot + "  " + name + "   " + d
+	gap := (w - 4) - lipgloss.Width(left) - lipgloss.Width(key)
+	if gap < 1 {
+		gap = 1
+	}
+	line := left + strings.Repeat(" ", gap) + key
+
+	border := p.Border
+	if sel {
+		border = p.Accent
+	}
+	box := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(border).Width(w-2).Padding(0, 1)
+	return box.Render(line)
 }
 
 // ── card primitives ──────────────────────────────────────────────────────────

@@ -29,12 +29,31 @@ func (m Model) View() string {
 	return strings.Join([]string{m.titlebar(p), stage, m.statusbar(p)}, "\n")
 }
 
-// bootPlace lays a boot-family block at the top-left with a left margin, padded
-// to fill the stage height.
+// bootPlace centers a boot-family block as a single unit — preserving its
+// internal left alignment — both horizontally and vertically in the stage.
 func (m Model) bootPlace(block string, stageH int) string {
-	out := []string{"", ""} // top margin
-	for _, l := range strings.Split(block, "\n") {
-		out = append(out, "    "+l)
+	lines := strings.Split(block, "\n")
+	blockW := 0
+	for _, l := range lines {
+		if w := lipgloss.Width(l); w > blockW {
+			blockW = w
+		}
+	}
+	left := (m.width - blockW) / 2
+	if left < 0 {
+		left = 0
+	}
+	top := (stageH - len(lines)) / 2
+	if top < 0 {
+		top = 0
+	}
+	pad := strings.Repeat(" ", left)
+	out := make([]string, 0, stageH)
+	for i := 0; i < top; i++ {
+		out = append(out, "")
+	}
+	for _, l := range lines {
+		out = append(out, pad+l)
 	}
 	for len(out) < stageH {
 		out = append(out, "")

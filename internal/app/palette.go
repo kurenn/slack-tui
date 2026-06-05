@@ -118,11 +118,11 @@ func (m *Model) runPalette(id string) tea.Cmd {
 	case id == "cmd:hints":
 		m.showHints = !m.showHints
 	case id == "cmd:active":
-		m.myStatus = "online"
+		return m.setStatus("online")
 	case id == "cmd:away":
-		m.myStatus = "away"
+		return m.setStatus("away")
 	case id == "cmd:dnd":
-		m.myStatus = "dnd"
+		return m.setStatus("dnd")
 	case id == "cmd:read":
 		for k := range m.meta {
 			m.meta[k] = components.Meta{Unread: 0, Mention: false}

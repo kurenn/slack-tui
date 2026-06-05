@@ -22,6 +22,8 @@ type Source interface {
 	Unread(convID string) (int, error)
 	// MarkRead marks the conversation read up to ts (persists to the backend).
 	MarkRead(convID, ts string) error
+	// SetPresence sets the user's presence (online | away | dnd) on the backend.
+	SetPresence(status string) error
 }
 
 // tokenColors is the stable palette of syntax-token color keys assigned to users

@@ -25,6 +25,14 @@ const settingsRows = 5
 func (m *Model) openSettings()  { m.settingsOpen, m.settingsSel = true, 0 }
 func (m *Model) closeSettings() { m.settingsOpen = false; _ = config.Save(m.prefs) }
 
+// setStatus updates presence locally, persists it, and pushes it to the backend.
+func (m *Model) setStatus(status string) tea.Cmd {
+	m.myStatus = status
+	m.prefs.Status = status
+	_ = config.Save(m.prefs)
+	return m.setPresenceCmd()
+}
+
 func (m Model) settingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "enter", ",", "q", "ctrl+c":
@@ -38,10 +46,20 @@ func (m Model) settingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.settingsSel = clamp(m.settingsSel-1, 0, settingsRows-1)
 	case "l", "right", " ":
 		m.cycleSetting(1)
+		return m, m.statusChangedCmd()
 	case "h", "left":
 		m.cycleSetting(-1)
+		return m, m.statusChangedCmd()
 	}
 	return m, nil
+}
+
+// statusChangedCmd pushes presence to the backend when the status row was cycled.
+func (m Model) statusChangedCmd() tea.Cmd {
+	if m.settingsSel == 3 {
+		return m.setPresenceCmd()
+	}
+	return nil
 }
 
 func (m *Model) cycleSetting(dir int) {

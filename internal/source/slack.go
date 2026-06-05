@@ -163,6 +163,23 @@ func (s *Slack) MarkRead(convID, ts string) error {
 	return s.api.MarkConversation(convID, ts)
 }
 
+// SetPresence updates presence/DND on Slack. Active/Away map to users.setPresence
+// (auto/away); DND snoozes notifications. Slack only allows "auto" or "away" for
+// presence — "active" is "auto".
+func (s *Slack) SetPresence(status string) error {
+	switch status {
+	case "away":
+		_, _ = s.api.EndSnooze()
+		return s.api.SetUserPresence("away")
+	case "dnd":
+		_, err := s.api.SetSnooze(120) // 2h Do Not Disturb
+		return err
+	default: // online / active
+		_, _ = s.api.EndSnooze()
+		return s.api.SetUserPresence("auto")
+	}
+}
+
 // fillUnread populates each conversation's unread count via conversations.info,
 // concurrently and bounded, with an overall timeout so startup can't hang.
 func (s *Slack) fillUnread(convs []data.Conversation) {

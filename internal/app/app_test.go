@@ -4,11 +4,29 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/abrahamkuri/slack-tui/internal/data"
 	"github.com/abrahamkuri/slack-tui/internal/source"
 )
+
+// TestStatusChangePushesPresence: cycling the Status row advances presence and
+// returns a command to push it to the backend.
+func TestStatusChangePushesPresence(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := newSized()
+	m.openSettings()
+	m.settingsSel = 3 // status row
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	m = next.(Model)
+	if m.myStatus != "away" {
+		t.Errorf("status should advance online→away, got %q", m.myStatus)
+	}
+	if cmd == nil {
+		t.Fatal("changing status should return a presence command")
+	}
+}
 
 func TestSettingsPanel(t *testing.T) {
 	t.Setenv("HOME", t.TempDir()) // keep config.Save off the real config dir

@@ -22,6 +22,12 @@ func dmPollTick() tea.Cmd {
 	return tea.Tick(dmPollInterval, func(time.Time) tea.Msg { return dmPollMsg{} })
 }
 
+// setPresenceCmd pushes the current presence (online/away/dnd) to the backend.
+func (m Model) setPresenceCmd() tea.Cmd {
+	src, status := m.src, m.myStatus
+	return func() tea.Msg { _ = src.SetPresence(status); return nil }
+}
+
 // markReadCmd tells the backend the conversation is read up to its latest message
 // (fire-and-forget), so unread polls/Socket Mode don't re-flag it.
 func (m Model) markReadCmd(convID string) tea.Cmd {

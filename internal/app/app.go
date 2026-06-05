@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/abrahamkuri/slack-tui/internal/config"
 	"github.com/abrahamkuri/slack-tui/internal/data"
@@ -51,6 +52,10 @@ type Model struct {
 	draft       textinput.Model
 	threadDraft textinput.Model
 
+	paletteOpen  bool
+	paletteQuery textinput.Model
+	paletteIndex int
+
 	width, height int
 	gPending      time.Time
 }
@@ -76,18 +81,19 @@ func New() Model {
 	}
 
 	m := Model{
-		ws:          ws,
-		prefs:       prefs,
-		pal:         theme.Resolve(prefs.Theme, prefs.Accent),
-		density:     theme.ParseDensity(prefs.Density),
-		showHints:   true,
-		messages:    messages,
-		meta:        meta,
-		myStatus:    prefs.Status,
-		activeID:    "engineering",
-		focus:       focusMessages,
-		draft:       mkInput(),
-		threadDraft: mkInput(),
+		ws:           ws,
+		prefs:        prefs,
+		pal:          theme.Resolve(prefs.Theme, prefs.Accent),
+		density:      theme.ParseDensity(prefs.Density),
+		showHints:    true,
+		messages:     messages,
+		meta:         meta,
+		myStatus:     prefs.Status,
+		activeID:     "engineering",
+		focus:        focusMessages,
+		draft:        mkInput(),
+		threadDraft:  mkInput(),
+		paletteQuery: mkInput(),
 	}
 	m.sideSel = m.flatIndexOf("engineering")
 	m.msgSel = max(0, len(m.messages["engineering"])-1)
@@ -215,12 +221,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
 	case tea.KeyMsg:
+		// Ctrl-K toggles the palette from any mode (Cmd never reaches a terminal).
+		if msg.String() == "ctrl+k" {
+			if m.paletteOpen {
+				m.closePalette()
+				return m, nil
+			}
+			return m, m.openPalette()
+		}
+		if m.paletteOpen {
+			return m.paletteKey(msg)
+		}
 		if m.insert {
 			return m.insertKey(msg)
 		}
 		return m.normalKey(msg)
 	}
 	// forward non-key msgs (cursor blink) to the active input
+	if m.paletteOpen {
+		var cmd tea.Cmd
+		m.paletteQuery, cmd = m.paletteQuery.Update(msg)
+		return m, cmd
+	}
 	if m.insert {
 		var cmd tea.Cmd
 		if m.focus == focusThread {
@@ -444,6 +466,32 @@ func nowStamp() string { return fmt.Sprintf("%d", time.Now().UnixNano()) }
 // gap renders a 1-col vertical separator filled with the app background.
 func (m Model) gap(height int) string {
 	return lipgloss.NewStyle().Width(1).Height(height).Background(m.pal.Bg).Render("")
+}
+
+// overlay composites an over block onto base at cell (x,y), ansi-aware.
+func overlay(base, over string, x, y int) string {
+	baseLines := strings.Split(base, "\n")
+	overLines := strings.Split(over, "\n")
+	for i, ol := range overLines {
+		row := y + i
+		if row < 0 || row >= len(baseLines) {
+			continue
+		}
+		baseLines[row] = spliceLine(baseLines[row], ol, x)
+	}
+	return strings.Join(baseLines, "\n")
+}
+
+// spliceLine replaces the [x, x+width(over)) slice of base with over, ansi-aware,
+// padding the left segment with spaces if base is shorter than x.
+func spliceLine(base, over string, x int) string {
+	ow := lipgloss.Width(over)
+	left := ansi.Truncate(base, x, "")
+	if lw := lipgloss.Width(left); lw < x {
+		left += strings.Repeat(" ", x-lw)
+	}
+	right := ansi.TruncateLeft(base, x+ow, "")
+	return left + "\x1b[0m" + over + "\x1b[0m" + right
 }
 
 // windowLines slices lines to a height-h window that keeps [selStart,selEnd] visible.

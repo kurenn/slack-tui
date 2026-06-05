@@ -53,7 +53,35 @@ func (m Model) View() string {
 
 	title := components.TitleBar(m.pal, m.ws.Name, m.ws.Me().Handle, m.myStatus, panes, m.width)
 	status := components.StatusBar(m.pal, m.insert, m.locName(conv), m.focus, m.hints(), m.showHints, m.width)
-	return strings.Join([]string{title, workspace, status}, "\n")
+	frame := strings.Join([]string{title, workspace, status}, "\n")
+
+	if m.paletteOpen {
+		frame = m.overlayPalette(frame)
+	}
+	return frame
+}
+
+// overlayPalette composites the command-palette box over the frame, centered
+// horizontally and ~12% from the top.
+func (m Model) overlayPalette(frame string) string {
+	boxW := 58
+	if boxW > m.width-8 {
+		boxW = m.width - 8
+	}
+	items := m.filteredPalette()
+	pitems := make([]components.PaletteItem, len(items))
+	for i, it := range items {
+		pitems[i] = it.item
+	}
+	m.paletteQuery.Width = max(4, boxW-10)
+	box := components.Palette(m.pal, m.paletteQuery.View(), pitems, m.paletteIndex, boxW, paletteMaxRows)
+
+	x := (m.width - boxW) / 2
+	y := m.height * 12 / 100
+	if y < 1 {
+		y = 1
+	}
+	return overlay(frame, box, x, y)
 }
 
 func (m Model) renderCenter(conv data.Conversation, w, bodyH int) string {

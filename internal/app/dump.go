@@ -30,6 +30,12 @@ func Key(m Model, key string) Model {
 		msg = tea.KeyMsg{Type: tea.KeyUp}
 	case "down":
 		msg = tea.KeyMsg{Type: tea.KeyDown}
+	case "ctrl+k":
+		msg = tea.KeyMsg{Type: tea.KeyCtrlK}
+	case "ctrl+n":
+		msg = tea.KeyMsg{Type: tea.KeyCtrlN}
+	case "ctrl+p":
+		msg = tea.KeyMsg{Type: tea.KeyCtrlP}
 	default:
 		msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
 	}

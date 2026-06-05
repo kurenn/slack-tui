@@ -20,11 +20,9 @@ func main() {
 		var w, h int
 		if _, err := fmt.Sscanf(os.Args[2], "%dx%d", &w, &h); err == nil {
 			m := app.WithSize(app.New(), w, h)
-			if len(os.Args) >= 4 { // replay literal keys, e.g. "jjt" or "i,h,i"
+			if len(os.Args) >= 4 { // replay comma-separated keys, e.g. "k,k,t" or "ctrl+k,d,e"
 				for _, key := range strings.Split(os.Args[3], ",") {
-					for _, r := range key {
-						m = app.Key(m, string(r))
-					}
+					m = app.Key(m, key)
 				}
 			}
 			fmt.Println(app.Dump(m, w, h))

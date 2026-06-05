@@ -60,6 +60,7 @@ type Palette struct {
 	SelBg     lipgloss.Color
 	MentionBg lipgloss.Color
 	CodeBg    lipgloss.Color
+	BadgeBg   lipgloss.Color
 
 	Blue   lipgloss.Color
 	Green  lipgloss.Color
@@ -200,6 +201,7 @@ func Resolve(themeName, accent string) Palette {
 		SelBg:      blend(rt.panel, rt.selOverlay, rt.sAlpha),
 		MentionBg:  blend(rt.bg, rt.mentionOverlay, rt.mAlpha),
 		CodeBg:     blend(rt.panel, rt.selOverlay, rt.sAlpha),
+		BadgeBg:    blend(rt.panel, rt.selOverlay, 0.26),
 		Blue:       c(rt.blue),
 		Green:      c(rt.green),
 		Purple:     c(rt.purple),

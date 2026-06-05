@@ -79,9 +79,13 @@ func sideRow(p theme.Palette, ws *data.Workspace, c data.Conversation, cursor, a
 		nameColor = p.Fg
 	}
 
+	sigilColor := p.Dim2
+	if unread || active {
+		sigilColor = p.Dim
+	}
 	var sigil string
 	if c.Type == "channel" {
-		sigil = lipgloss.NewStyle().Foreground(p.Dim2).Bold(true).Render("#")
+		sigil = lipgloss.NewStyle().Foreground(sigilColor).Bold(true).Render("#")
 	} else {
 		sigil = PresenceDot(p, ws.Users[c.UserID].Status)
 	}
@@ -92,7 +96,7 @@ func sideRow(p theme.Palette, ws *data.Workspace, c data.Conversation, cursor, a
 	case c.Mention:
 		badge = lipgloss.NewStyle().Foreground(p.Bg).Background(p.Orange).Render(fmt.Sprintf(" @%d ", c.Unread))
 	case unread:
-		badge = lipgloss.NewStyle().Foreground(p.Dim).Background(p.SelBg).Render(fmt.Sprintf(" %d ", c.Unread))
+		badge = lipgloss.NewStyle().Foreground(p.Fg).Background(p.BadgeBg).Render(fmt.Sprintf(" %d ", c.Unread))
 	}
 
 	// 2-col left margin holds the accent cursor bar when this row is the cursor.

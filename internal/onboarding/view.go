@@ -202,17 +202,13 @@ func (m Model) stage(p theme.Palette) string {
 func (m Model) titlebar(p theme.Palette) string {
 	bg := lipgloss.NewStyle().Background(p.TitlebarBg)
 	dim := bg.Foreground(p.Dim)
-	dot := func(hex string) string {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(hex)).Background(p.TitlebarBg).Render("●")
-	}
-	lights := " " + dot("#ff5f57") + " " + dot("#febc2e") + " " + dot("#28c840") + "  "
 	title := dim.Render("slack-tui — ") + bg.Foreground(p.Fg).Bold(true).Render("onboarding")
 	right := "monospace-labs"
 	if h := m.handle.Value(); h != "" {
 		right = "@" + h
 	}
 	r := dim.Render(right)
-	left := lights + title
+	left := "  " + title
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(r) - 1
 	if gap < 1 {
 		gap = 1

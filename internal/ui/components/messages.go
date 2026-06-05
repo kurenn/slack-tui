@@ -68,9 +68,10 @@ func messageLines(p theme.Palette, ws *data.Workspace, msg data.Message, w int, 
 	}
 	if len(msg.Replies) > 0 {
 		who := replyWho(ws, msg.Replies)
-		aff := lipgloss.NewStyle().Foreground(p.Dim).Render("└─ ") +
-			lipgloss.NewStyle().Foreground(p.Accent).Render(fmt.Sprintf("%d %s ", len(msg.Replies), plural(len(msg.Replies), "reply", "replies"))) +
-			lipgloss.NewStyle().Foreground(p.Dim2).Render(who+"  ↵ open")
+		aff := lipgloss.NewStyle().Foreground(p.Dim2).Render("└ ") +
+			lipgloss.NewStyle().Foreground(p.Accent).Bold(true).Render(fmt.Sprintf("%d %s ", len(msg.Replies), plural(len(msg.Replies), "reply", "replies"))) +
+			lipgloss.NewStyle().Foreground(p.Dim).Render(who) +
+			lipgloss.NewStyle().Foreground(p.Dim2).Render("  ↵ open")
 		out = append(out, strings.Repeat(" ", timeGutter)+aff)
 	}
 

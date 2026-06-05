@@ -18,11 +18,14 @@ var tokRe = regexp.MustCompile("(`[^`]+`)|(@[A-Za-z0-9_.]+)|(#[A-Za-z0-9_-]+)|(h
 // Inline styles a single line, tokenizing inline spans. @you is highlighted as a
 // self-mention. width is the wrap width; <=0 disables wrapping.
 func Inline(p theme.Palette, line string) string {
-	code := lipgloss.NewStyle().Foreground(p.Orange).Background(p.CodeBg)
-	mention := lipgloss.NewStyle().Foreground(p.Blue)
-	mentionMe := lipgloss.NewStyle().Foreground(p.Orange).Bold(true)
+	// Exact token colors from the design CSS:
+	//   `code` → cyan on code-bg · @mention → orange · @you → orange chip ·
+	//   #channel → blue · url → blue underline.
+	code := lipgloss.NewStyle().Foreground(p.Cyan).Background(p.CodeBg)
+	mention := lipgloss.NewStyle().Foreground(p.Orange)
+	mentionMe := lipgloss.NewStyle().Foreground(p.Bg).Background(p.Orange).Bold(true)
 	channel := lipgloss.NewStyle().Foreground(p.Blue)
-	url := lipgloss.NewStyle().Foreground(p.Cyan).Underline(true)
+	url := lipgloss.NewStyle().Foreground(p.Blue).Underline(true)
 
 	var b strings.Builder
 	last := 0
@@ -56,15 +59,18 @@ func Inline(p theme.Palette, line string) string {
 // Render styles a full message body: fenced ``` blocks become code blocks, other
 // segments are line-tokenized. Returns a multi-line styled string.
 func Render(p theme.Palette, text string) string {
-	codeBlock := lipgloss.NewStyle().Foreground(p.Fg).Background(p.CodeBg).Padding(0, 1)
+	bar := lipgloss.NewStyle().Foreground(p.Green).Render("▌")
+	codeCell := lipgloss.NewStyle().Foreground(p.Fg).Background(p.CodeBg)
 
 	parts := strings.Split(text, "```")
 	var out []string
 	for i, seg := range parts {
-		if i%2 == 1 { // fenced block
+		if i%2 == 1 { // fenced block: green left bar + code-bg fill
 			seg = strings.TrimPrefix(seg, "\n")
 			seg = strings.TrimSuffix(seg, "\n")
-			out = append(out, codeBlock.Render(seg))
+			for _, ln := range strings.Split(seg, "\n") {
+				out = append(out, bar+codeCell.Render(" "+ln+" "))
+			}
 			continue
 		}
 		if seg == "" {

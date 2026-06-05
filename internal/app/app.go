@@ -143,8 +143,11 @@ func New() Model {
 
 func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{pollTick()}
-	if s, ok := m.src.(streamer); ok && s.Events() != nil {
-		cmds = append(cmds, listenEvents(s))
+	if sl, ok := m.src.(*source.Slack); ok {
+		if sl.Events() != nil {
+			cmds = append(cmds, listenEvents(sl)) // live channel events
+		}
+		cmds = append(cmds, dmPollTick()) // periodic DM unread (Socket Mode can't see DMs)
 	}
 	return tea.Batch(cmds...)
 }
@@ -209,7 +212,7 @@ func (m *Model) ensureHistory(id string) {
 	m.messages[id] = msgs
 }
 
-func (m *Model) openChannel(id string) {
+func (m *Model) openChannel(id string) tea.Cmd {
 	m.activeID = id
 	m.ensureHistory(id)
 	m.msgSel = max(0, len(m.messages[id])-1)
@@ -217,6 +220,7 @@ func (m *Model) openChannel(id string) {
 	m.focus = focusMessages
 	m.sideSel = m.flatIndexOf(id)
 	m.threadRootID = ""
+	return m.markReadCmd(id) // persist read state to the backend
 }
 
 func (m *Model) openThread(msgID string) tea.Cmd {
@@ -289,7 +293,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
 	case pollMsg:
-		return m, tea.Batch(pollTick(), m.refresh())
+		return m, tea.Batch(pollTick(), m.refresh(), m.markReadCmd(m.activeID))
+	case dmPollMsg:
+		return m, tea.Batch(dmPollTick(), m.dmUnreadCmd())
+	case unreadMsg:
+		for _, d := range m.ws.DMs {
+			if d.ID == m.activeID {
+				continue
+			}
+			mm := m.meta[d.ID]
+			mm.Unread = msg.counts[d.ID]
+			m.meta[d.ID] = mm
+		}
+		return m, nil
 	case historyMsg:
 		if msg.err == nil {
 			m.applyHistory(msg.convID, msg.msgs)
@@ -409,7 +425,7 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch m.focus {
 		case focusSidebar:
 			if it := m.sideItems()[m.sideSel]; !it.Header {
-				m.openChannel(it.Conv.ID)
+				return m, m.openChannel(it.Conv.ID)
 			}
 		case focusMessages:
 			if msgs := m.curMsgs(); m.msgSel < len(msgs) {

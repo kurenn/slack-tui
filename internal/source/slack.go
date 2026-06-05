@@ -43,15 +43,7 @@ func (s *Slack) Load() (*data.Workspace, error) {
 		return nil, fmt.Errorf("users: %w", err)
 	}
 	for _, u := range su {
-		name := u.Name
-		if u.Profile.DisplayName != "" {
-			name = u.Profile.DisplayName
-		}
-		status := "online"
-		if u.Deleted || u.IsBot {
-			status = "offline"
-		}
-		users[u.ID] = data.User{ID: u.ID, Name: name, Handle: u.Name, Color: ColorFor(u.ID), Status: status}
+		users[u.ID] = toUser(u)
 	}
 	s.users = users
 	me := users[s.meID]
@@ -74,7 +66,7 @@ func (s *Slack) Load() (*data.Workspace, error) {
 				if c.User == "" || c.IsUserDeleted {
 					continue
 				}
-				dms = append(dms, data.Conversation{ID: c.ID, Type: "dm", Name: nameOf(users, c.User), UserID: c.User})
+				dms = append(dms, data.Conversation{ID: c.ID, Type: "dm", UserID: c.User})
 			case c.IsMember && !c.IsMpIM:
 				channels = append(channels, data.Conversation{ID: c.ID, Type: "channel", Name: c.Name, Topic: c.Topic.Value})
 			}
@@ -83,6 +75,14 @@ func (s *Slack) Load() (*data.Workspace, error) {
 			break
 		}
 		cursor = next
+	}
+	s.resolveDMNames(dms, users) // users.list omits some (deactivated/external) — fetch them
+	for i := range dms {
+		if u, ok := users[dms[i].UserID]; ok && u.Name != "" {
+			dms[i].Name = u.Name
+		} else {
+			dms[i].Name = dms[i].UserID
+		}
 	}
 	sort.Slice(channels, func(i, j int) bool { return channels[i].Name < channels[j].Name })
 	sort.Slice(dms, func(i, j int) bool { return dms[i].Name < dms[j].Name })
@@ -95,6 +95,72 @@ func (s *Slack) Load() (*data.Workspace, error) {
 	}
 	ws.Users[s.meID] = me
 	return ws, nil
+}
+
+// toUser maps a Slack user to ours, preferring display/real name.
+func toUser(u slack.User) data.User {
+	name := u.Name
+	if u.Profile.RealName != "" {
+		name = u.Profile.RealName
+	}
+	if u.Profile.DisplayName != "" {
+		name = u.Profile.DisplayName
+	}
+	status := "online"
+	if u.Deleted || u.IsBot {
+		status = "offline"
+	}
+	return data.User{ID: u.ID, Name: name, Handle: u.Name, Color: ColorFor(u.ID), Status: status}
+}
+
+// resolveDMNames fetches user info for DM partners missing from the bulk
+// users.list (deactivated or external users), concurrently and bounded.
+func (s *Slack) resolveDMNames(dms []data.Conversation, users map[string]data.User) {
+	var missing []string
+	for _, d := range dms {
+		if _, ok := users[d.UserID]; !ok {
+			missing = append(missing, d.UserID)
+		}
+	}
+	if len(missing) == 0 {
+		return
+	}
+	sem := make(chan struct{}, 16)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	for _, id := range missing {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			u, err := s.api.GetUserInfo(id)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			users[id] = toUser(*u)
+			mu.Unlock()
+		}(id)
+	}
+	wg.Wait()
+}
+
+// Unread returns a conversation's unread message count.
+func (s *Slack) Unread(convID string) (int, error) {
+	ci, err := s.api.GetConversationInfo(&slack.GetConversationInfoInput{ChannelID: convID})
+	if err != nil {
+		return 0, err
+	}
+	return ci.UnreadCountDisplay, nil
+}
+
+// MarkRead marks a conversation read up to ts on Slack.
+func (s *Slack) MarkRead(convID, ts string) error {
+	if ts == "" {
+		return nil
+	}
+	return s.api.MarkConversation(convID, ts)
 }
 
 // fillUnread populates each conversation's unread count via conversations.info,

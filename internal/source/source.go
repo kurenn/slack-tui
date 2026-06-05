@@ -18,6 +18,10 @@ type Source interface {
 	Send(convID, text string) (data.Message, error)
 	// SendReply posts a threaded reply under rootID.
 	SendReply(convID, rootID, text string) (data.Reply, error)
+	// Unread returns the conversation's unread message count.
+	Unread(convID string) (int, error)
+	// MarkRead marks the conversation read up to ts (persists to the backend).
+	MarkRead(convID, ts string) error
 }
 
 // tokenColors is the stable palette of syntax-token color keys assigned to users

@@ -88,11 +88,12 @@ func (m Model) paletteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case k == "enter":
 		items := m.filteredPalette()
+		var cmd tea.Cmd
 		if m.paletteIndex < len(items) {
-			m.runPalette(items[m.paletteIndex].id)
+			cmd = m.runPalette(items[m.paletteIndex].id)
 		}
 		m.closePalette()
-		return m, nil
+		return m, cmd
 	}
 	var cmd tea.Cmd
 	m.paletteQuery, cmd = m.paletteQuery.Update(msg)
@@ -100,13 +101,13 @@ func (m Model) paletteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// runPalette executes a palette action by id.
-func (m *Model) runPalette(id string) {
+// runPalette executes a palette action by id, returning any follow-up command.
+func (m *Model) runPalette(id string) tea.Cmd {
 	switch {
 	case strings.HasPrefix(id, "ch:"):
-		m.openChannel(strings.TrimPrefix(id, "ch:"))
+		return m.openChannel(strings.TrimPrefix(id, "ch:"))
 	case strings.HasPrefix(id, "dm:"):
-		m.openChannel(strings.TrimPrefix(id, "dm:"))
+		return m.openChannel(strings.TrimPrefix(id, "dm:"))
 	case id == "cmd:theme":
 		i := indexOf(theme.Cycle, m.prefs.Theme)
 		m.prefs.Theme = theme.Cycle[(i+1)%len(theme.Cycle)]
@@ -124,4 +125,5 @@ func (m *Model) runPalette(id string) {
 			m.meta[k] = components.Meta{Unread: 0, Mention: false}
 		}
 	}
+	return nil
 }

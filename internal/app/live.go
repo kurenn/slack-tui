@@ -1,6 +1,7 @@
 package app
 
 import (
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -8,6 +9,64 @@ import (
 	"github.com/abrahamkuri/slack-tui/internal/data"
 	"github.com/abrahamkuri/slack-tui/internal/source"
 )
+
+// dmPollInterval refreshes DM unread counts — Socket Mode can't see personal DMs.
+const dmPollInterval = 45 * time.Second
+
+type (
+	dmPollMsg struct{}
+	unreadMsg struct{ counts map[string]int }
+)
+
+func dmPollTick() tea.Cmd {
+	return tea.Tick(dmPollInterval, func(time.Time) tea.Msg { return dmPollMsg{} })
+}
+
+// markReadCmd tells the backend the conversation is read up to its latest message
+// (fire-and-forget), so unread polls/Socket Mode don't re-flag it.
+func (m Model) markReadCmd(convID string) tea.Cmd {
+	msgs := m.messages[convID]
+	if len(msgs) == 0 {
+		return nil
+	}
+	ts := msgs[len(msgs)-1].ID
+	src := m.src
+	return func() tea.Msg { _ = src.MarkRead(convID, ts); return nil }
+}
+
+// dmUnreadCmd fetches unread counts for all DMs (except the active one),
+// concurrently, off the UI thread.
+func (m Model) dmUnreadCmd() tea.Cmd {
+	src := m.src
+	active := m.activeID
+	ids := make([]string, 0, len(m.ws.DMs))
+	for _, d := range m.ws.DMs {
+		if d.ID != active {
+			ids = append(ids, d.ID)
+		}
+	}
+	return func() tea.Msg {
+		counts := map[string]int{}
+		sem := make(chan struct{}, 12)
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		for _, id := range ids {
+			wg.Add(1)
+			go func(id string) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				if n, err := src.Unread(id); err == nil && n > 0 {
+					mu.Lock()
+					counts[id] = n
+					mu.Unlock()
+				}
+			}(id)
+		}
+		wg.Wait()
+		return unreadMsg{counts}
+	}
+}
 
 // streamer is a Source that pushes real-time events (Socket Mode).
 type streamer interface {

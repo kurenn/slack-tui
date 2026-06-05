@@ -83,6 +83,13 @@ func New() Model {
 		ws, _ = src.Load()
 	}
 
+	// Real-time: start Socket Mode if the app + bot tokens are present.
+	if sl, ok := src.(*source.Slack); ok {
+		if app, bot := os.Getenv("SLACK_APP_TOKEN"), os.Getenv("SLACK_BOT_TOKEN"); app != "" && bot != "" {
+			sl.StartSocket(app, bot)
+		}
+	}
+
 	// Onboarding hand-off: adopt the chosen handle as the current user's identity.
 	if prefs.Handle != "" {
 		me := ws.Users[ws.MeID]
@@ -134,7 +141,13 @@ func New() Model {
 	return m
 }
 
-func (m Model) Init() tea.Cmd { return pollTick() }
+func (m Model) Init() tea.Cmd {
+	cmds := []tea.Cmd{pollTick()}
+	if s, ok := m.src.(streamer); ok && s.Events() != nil {
+		cmds = append(cmds, listenEvents(s))
+	}
+	return tea.Batch(cmds...)
+}
 
 // ── derived helpers ─────────────────────────────────────────────────────────
 
@@ -285,6 +298,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case repliesMsg:
 		if msg.err == nil {
 			m.applyReplies(msg.convID, msg.rootID, msg.replies)
+		}
+		return m, nil
+	case eventMsg:
+		m.handleEvent(msg.ev)
+		if s, ok := m.src.(streamer); ok {
+			return m, listenEvents(s) // keep listening
 		}
 		return m, nil
 	case tea.KeyMsg:

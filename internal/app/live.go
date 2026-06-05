@@ -6,7 +6,48 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/abrahamkuri/slack-tui/internal/data"
+	"github.com/abrahamkuri/slack-tui/internal/source"
 )
+
+// streamer is a Source that pushes real-time events (Socket Mode).
+type streamer interface {
+	Events() <-chan source.Event
+}
+
+// eventMsg carries one real-time Socket Mode event into the update loop.
+type eventMsg struct{ ev source.Event }
+
+// listenEvents blocks on the next stream event and delivers it as a msg.
+func listenEvents(s streamer) tea.Cmd {
+	return func() tea.Msg {
+		ev, ok := <-s.Events()
+		if !ok {
+			return nil
+		}
+		return eventMsg{ev}
+	}
+}
+
+// handleEvent applies a live message event: a message in a non-active channel
+// bumps its unread (and mention) so the sidebar dot lights up immediately. The
+// active channel and open thread are kept fresh by polling.
+func (m *Model) handleEvent(ev source.Event) {
+	if ev.ConvID == "" || ev.ConvID == m.activeID {
+		return
+	}
+	if _, ok := m.ws.Conversation(ev.ConvID); !ok {
+		return
+	}
+	if ev.Msg.UserID == m.ws.MeID {
+		return // our own message from another client
+	}
+	meta := m.meta[ev.ConvID]
+	meta.Unread++
+	if ev.Msg.MentionsMe {
+		meta.Mention = true
+	}
+	m.meta[ev.ConvID] = meta
+}
 
 // pollInterval is how often the active channel (and open thread) are refreshed.
 const pollInterval = 6 * time.Second

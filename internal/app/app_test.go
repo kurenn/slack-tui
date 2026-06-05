@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/abrahamkuri/slack-tui/internal/data"
+	"github.com/abrahamkuri/slack-tui/internal/source"
 )
 
 func init() { /* tests drive the model headlessly via Key/WithSize */ }
@@ -23,6 +24,22 @@ func TestPollUpdatesOpenThread(t *testing.T) {
 	root, _ := m.threadRoot()
 	if len(root.Replies) != 1 || root.Replies[0].Text != "fresh reply" {
 		t.Fatalf("open thread not updated from poll: %+v", root.Replies)
+	}
+}
+
+// TestSocketEventMarksUnread: a live message in a non-active channel lights up
+// its unread (and mention); an event for the active channel is ignored.
+func TestSocketEventMarksUnread(t *testing.T) {
+	m := newSized()
+	other := "random" // starts read in the mock
+	m.handleEvent(source.Event{ConvID: other, Msg: data.Message{UserID: "ada", Text: "hey @you", MentionsMe: true}})
+	if m.meta[other].Unread != 1 || !m.meta[other].Mention {
+		t.Fatalf("non-active event should mark unread+mention, got %+v", m.meta[other])
+	}
+	before := m.meta[m.activeID]
+	m.handleEvent(source.Event{ConvID: m.activeID, Msg: data.Message{UserID: "ada", Text: "x"}})
+	if m.meta[m.activeID] != before {
+		t.Error("active-channel event should not change its unread")
 	}
 }
 

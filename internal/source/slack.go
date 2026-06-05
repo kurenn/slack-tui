@@ -18,9 +18,10 @@ import (
 // Slack is a Source backed by the Slack Web API, authenticated with a user
 // token (xoxp). Network calls here run inside tea.Cmds.
 type Slack struct {
-	api   *slack.Client
-	meID  string
-	users map[string]data.User // resolved lazily, seeded by Load
+	api    *slack.Client
+	meID   string
+	users  map[string]data.User // resolved lazily, seeded by Load
+	events chan Event           // Socket Mode stream (nil until StartSocket)
 }
 
 // NewSlack builds a Slack source from a user OAuth token (xoxp-…).

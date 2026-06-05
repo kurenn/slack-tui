@@ -134,7 +134,7 @@ func New() Model {
 	return m
 }
 
-func (m Model) Init() tea.Cmd { return nil }
+func (m Model) Init() tea.Cmd { return pollTick() }
 
 // ── derived helpers ─────────────────────────────────────────────────────────
 
@@ -206,10 +206,11 @@ func (m *Model) openChannel(id string) {
 	m.threadRootID = ""
 }
 
-func (m *Model) openThread(msgID string) {
+func (m *Model) openThread(msgID string) tea.Cmd {
 	m.threadRootID = msgID
 	m.threadSel = 0
 	m.focus = focusThread
+	return m.repliesCmd(m.activeID, msgID)
 }
 
 func (m *Model) closeThread() {
@@ -273,6 +274,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		return m, nil
+	case pollMsg:
+		return m, tea.Batch(pollTick(), m.refresh())
+	case historyMsg:
+		if msg.err == nil {
+			m.applyHistory(msg.convID, msg.msgs)
+		}
+		return m, nil
+	case repliesMsg:
+		if msg.err == nil {
+			m.applyReplies(msg.convID, msg.rootID, msg.replies)
+		}
 		return m, nil
 	case tea.KeyMsg:
 		// Ctrl-K toggles the palette from any mode (Cmd never reaches a terminal).
@@ -341,6 +354,8 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch k {
 	case "ctrl+c", "q":
 		return m, tea.Quit
+	case "ctrl+r": // manual refresh of the active channel + open thread
+		return m, m.refresh()
 
 	case "tab":
 		m.focus = order[(idx+1)%len(order)]
@@ -379,7 +394,7 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case focusMessages:
 			if msgs := m.curMsgs(); m.msgSel < len(msgs) {
-				m.openThread(msgs[m.msgSel].ID)
+				return m, m.openThread(msgs[m.msgSel].ID)
 			}
 		case focusThread:
 			return m, m.enterInsert(focusThread)
@@ -388,7 +403,7 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "t":
 		if m.focus == focusMessages {
 			if msgs := m.curMsgs(); m.msgSel < len(msgs) {
-				m.openThread(msgs[m.msgSel].ID)
+				return m, m.openThread(msgs[m.msgSel].ID)
 			}
 		}
 
@@ -408,8 +423,8 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.focus == focusMessages {
 			if msgs := m.curMsgs(); m.msgSel < len(msgs) {
-				m.openThread(msgs[m.msgSel].ID)
-				return m, m.enterInsert(focusThread)
+				openCmd := m.openThread(msgs[m.msgSel].ID)
+				return m, tea.Batch(openCmd, m.enterInsert(focusThread))
 			}
 		}
 

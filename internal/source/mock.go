@@ -28,7 +28,20 @@ func NewMock() *Mock {
 func (m *Mock) Load() (*data.Workspace, error) { return m.ws, nil }
 
 func (m *Mock) History(convID string) ([]data.Message, error) {
-	return append([]data.Message(nil), m.messages[convID]...), nil
+	out := append([]data.Message(nil), m.messages[convID]...)
+	for i := range out {
+		out[i].ReplyCount = len(out[i].Replies)
+	}
+	return out, nil
+}
+
+func (m *Mock) Replies(convID, rootID string) ([]data.Reply, error) {
+	for _, msg := range m.messages[convID] {
+		if msg.ID == rootID {
+			return append([]data.Reply(nil), msg.Replies...), nil
+		}
+	}
+	return nil, nil
 }
 
 func (m *Mock) Send(convID, text string) (data.Message, error) {

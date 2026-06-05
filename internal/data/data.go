@@ -33,7 +33,8 @@ type Reply struct {
 	Text   string
 }
 
-// Message is a top-level message in a conversation.
+// Message is a top-level message in a conversation. ReplyCount is the thread
+// size even when Replies haven't been fetched yet (lazy load on thread open).
 type Message struct {
 	ID         string
 	UserID     string
@@ -41,6 +42,7 @@ type Message struct {
 	Text       string
 	Reactions  []Reaction
 	Replies    []Reply
+	ReplyCount int
 	MentionsMe bool
 }
 

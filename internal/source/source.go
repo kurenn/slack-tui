@@ -9,8 +9,11 @@ import "github.com/abrahamkuri/slack-tui/internal/data"
 type Source interface {
 	// Load fetches identity, users, channels and DMs (metadata, no history).
 	Load() (*data.Workspace, error)
-	// History fetches recent messages for a conversation.
+	// History fetches recent messages for a conversation (thread replies are
+	// lazy — only ReplyCount is set; call Replies to load them).
 	History(convID string) ([]data.Message, error)
+	// Replies fetches the replies of a thread root.
+	Replies(convID, rootID string) ([]data.Reply, error)
 	// Send posts a message to a conversation and returns the stored message.
 	Send(convID, text string) (data.Message, error)
 	// SendReply posts a threaded reply under rootID.

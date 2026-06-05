@@ -1,8 +1,47 @@
 package app
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/abrahamkuri/slack-tui/internal/data"
+)
 
 func init() { /* tests drive the model headlessly via Key/WithSize */ }
+
+// TestPollUpdatesOpenThread reproduces the reported bug: a reply arriving while
+// a thread is open must appear (here delivered as the poll's repliesMsg).
+func TestPollUpdatesOpenThread(t *testing.T) {
+	m := newSized()
+	m.msgSel = 2 // e3, a message with replies
+	m = Key(m, "t")
+	if !m.threadOpen() {
+		t.Fatal("thread should be open")
+	}
+	next, _ := m.Update(repliesMsg{convID: m.activeID, rootID: m.threadRootID,
+		replies: []data.Reply{{ID: "x", UserID: "ada", Time: "10:00", Text: "fresh reply"}}})
+	m = next.(Model)
+	root, _ := m.threadRoot()
+	if len(root.Replies) != 1 || root.Replies[0].Text != "fresh reply" {
+		t.Fatalf("open thread not updated from poll: %+v", root.Replies)
+	}
+}
+
+// TestPollFollowsBottom: a new channel message arriving while the user is at the
+// bottom should move the selection to follow it.
+func TestPollFollowsBottom(t *testing.T) {
+	m := newSized()
+	m.msgSel = len(m.curMsgs()) - 1 // at the bottom
+	grown := append(append([]data.Message(nil), m.curMsgs()...),
+		data.Message{ID: "new", UserID: "ada", Time: "10:00", Text: "incoming"})
+	next, _ := m.Update(historyMsg{convID: m.activeID, msgs: grown})
+	m = next.(Model)
+	if got := m.curMsgs()[len(m.curMsgs())-1].Text; got != "incoming" {
+		t.Fatalf("new message not applied, last = %q", got)
+	}
+	if m.msgSel != len(m.curMsgs())-1 {
+		t.Errorf("selection should follow the new bottom, msgSel = %d", m.msgSel)
+	}
+}
 
 func newSized() Model { return WithSize(New(), 100, 30) }
 

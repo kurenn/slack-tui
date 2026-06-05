@@ -130,7 +130,7 @@ func (s *Slack) History(convID string) ([]data.Message, error) {
 	}
 	var out []data.Message
 	for i := len(resp.Messages) - 1; i >= 0; i-- { // API returns newest first
-		out = append(out, s.toMessage(convID, resp.Messages[i]))
+		out = append(out, s.toMessage(resp.Messages[i]))
 	}
 	return out, nil
 }
@@ -153,20 +153,30 @@ func (s *Slack) SendReply(convID, rootID, text string) (data.Reply, error) {
 
 // ── mapping helpers ──────────────────────────────────────────────────────────
 
-func (s *Slack) toMessage(convID string, m slack.Message) data.Message {
+// Replies fetches a thread's replies (lazy — called when a thread is opened or
+// polled, so History stays a single cheap call).
+func (s *Slack) Replies(convID, rootID string) ([]data.Reply, error) {
+	reps, _, _, err := s.api.GetConversationReplies(&slack.GetConversationRepliesParameters{ChannelID: convID, Timestamp: rootID})
+	if err != nil {
+		return nil, err
+	}
+	var out []data.Reply
+	for _, r := range reps {
+		if r.Timestamp == rootID { // skip the root itself
+			continue
+		}
+		out = append(out, data.Reply{ID: r.Timestamp, UserID: r.User, Time: tsTime(r.Timestamp), Text: s.renderText(r.Text)})
+	}
+	return out, nil
+}
+
+func (s *Slack) toMessage(m slack.Message) data.Message {
 	msg := data.Message{
 		ID: m.Timestamp, UserID: m.User, Time: tsTime(m.Timestamp), Text: s.renderText(m.Text),
-		MentionsMe: strings.Contains(m.Text, "<@"+s.meID+">"),
+		ReplyCount: m.ReplyCount, MentionsMe: strings.Contains(m.Text, "<@"+s.meID+">"),
 	}
 	for _, r := range m.Reactions {
 		msg.Reactions = append(msg.Reactions, data.Reaction{Emoji: emojiOf(r.Name), Count: r.Count})
-	}
-	if m.ReplyCount > 0 {
-		if reps, _, _, err := s.api.GetConversationReplies(&slack.GetConversationRepliesParameters{ChannelID: convID, Timestamp: m.Timestamp}); err == nil {
-			for _, r := range reps[1:] { // first is the root
-				msg.Replies = append(msg.Replies, data.Reply{ID: r.Timestamp, UserID: r.User, Time: tsTime(r.Timestamp), Text: s.renderText(r.Text)})
-			}
-		}
 	}
 	return msg
 }

@@ -168,10 +168,7 @@ func (m Model) stage(p theme.Palette) string {
 	case phaseAuth:
 		return bootScreen(p, m.viewAuth(p))
 	case phaseToken:
-		return bootScreen(p, m.viewLogin(p, "token:", m.token.View(), []tline{
-			{text: "authenticate with an access token", class: "fg"},
-			{text: "paste a workspace token — begins with xoxp- or xoxb-.", class: "dim"},
-		}, "paste your token, then press ↵ enter · it never leaves this machine"))
+		return bootScreen(p, m.viewTokenForm(p))
 	case phaseIdentity:
 		var lines []tline
 		if m.provider == "guest" {
@@ -342,6 +339,31 @@ func authColor(p theme.Palette, id string) lipgloss.Color {
 }
 
 // ── login (token / identity) ─────────────────────────────────────────────────
+
+// viewTokenForm renders the three token inputs (user required, app/bot optional).
+func (m Model) viewTokenForm(p theme.Palette) string {
+	head := []string{
+		m.tlineRender(p, tline{text: "authenticate with access tokens", class: "fg"}),
+		m.tlineRender(p, tline{text: "user token is required; app + bot tokens enable live channel unread (optional).", class: "dim"}),
+	}
+	labels := []string{"user token (xoxp):", "app token  (xapp):", "bot token  (xoxb):"}
+	views := []string{m.token.View(), m.appToken.View(), m.botToken.View()}
+	var rows []string
+	for i, label := range labels {
+		labelColor := p.Dim
+		if i == m.tokenField {
+			labelColor = p.Green
+		}
+		row := lipgloss.NewStyle().Foreground(labelColor).Render(label+" ") +
+			lipgloss.NewStyle().Foreground(p.Fg).Render(views[i])
+		if i == m.tokenField {
+			row += lipgloss.NewStyle().Foreground(p.Accent).Render("▋")
+		}
+		rows = append(rows, row)
+	}
+	hint := lipgloss.NewStyle().Foreground(p.Dim2).Render("tab switches fields · ↵ enter continues · stays on this machine")
+	return lipgloss.JoinVertical(lipgloss.Left, strings.Join(head, "\n"), "", strings.Join(rows, "\n"), "", hint)
+}
 
 func (m Model) viewLogin(p theme.Palette, label, input string, lines []tline, hint string) string {
 	var head []string

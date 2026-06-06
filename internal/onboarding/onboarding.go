@@ -54,8 +54,11 @@ type Model struct {
 	density   string
 	status    string
 
-	handle textinput.Model
-	token  textinput.Model
+	handle     textinput.Model
+	token      textinput.Model // user token (xoxp)
+	appToken   textinput.Model // app-level token (xapp) — Socket Mode
+	botToken   textinput.Model // bot token (xoxb) — Socket Mode
+	tokenField int             // which token input is focused (0=user,1=app,2=bot)
 
 	authSel  int
 	provider string
@@ -88,6 +91,8 @@ func New() Model {
 		status:    orDefault(prefs.Status, "online"),
 		handle:    mk("handle"),
 		token:     mk("token"),
+		appToken:  mk("app"),
+		botToken:  mk("bot"),
 		trainer:   newTrainer(),
 	}
 	m.boot = newTypewriter(bootLines())
@@ -166,10 +171,16 @@ func (m Model) finish() (Model, tea.Cmd) {
 		TS:        time.Now().Unix(),
 	}
 	_ = config.Save(prefs)
-	// Persist a pasted user token so the app connects to real Slack on launch.
+	// Persist pasted tokens so the app connects to real Slack on launch.
 	if tok := strings.TrimSpace(m.token.Value()); tok != "" {
 		saved, _ := config.LoadTokens()
 		saved.User = tok
+		if a := strings.TrimSpace(m.appToken.Value()); a != "" {
+			saved.App = a
+		}
+		if b := strings.TrimSpace(m.botToken.Value()); b != "" {
+			saved.Bot = b
+		}
 		_ = config.SaveTokens(saved)
 	}
 	return m, func() tea.Msg { return FinishedMsg{Prefs: prefs} }

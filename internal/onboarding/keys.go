@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -110,7 +111,7 @@ func (m Model) chooseAuth(opt authOpt) (Model, tea.Cmd) {
 	switch opt.id {
 	case "token":
 		m.phase = phaseToken
-		return m, m.token.Focus()
+		return m, m.focusToken(0)
 	case "guest":
 		m.phase = phaseIdentity
 		return m, m.handle.Focus()
@@ -125,17 +126,35 @@ func (m Model) tokenKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		if len(strings.TrimSpace(m.token.Value())) >= 4 {
+			m.tokenInputs()[m.tokenField].Blur()
 			m.phase = phaseIdentity
-			m.token.Blur()
 			return m, m.handle.Focus()
 		}
-		return m, nil
+		return m, nil // user token required to continue (Tab moves between fields)
+	case "tab", "down":
+		return m, m.focusToken((m.tokenField + 1) % 3)
+	case "shift+tab", "up":
+		return m, m.focusToken((m.tokenField + 2) % 3)
 	case "esc":
 		return m, nil
 	}
 	var cmd tea.Cmd
-	m.token, cmd = m.token.Update(msg)
+	in := m.tokenInputs()[m.tokenField]
+	*in, cmd = in.Update(msg)
 	return m, cmd
+}
+
+// tokenInputs returns the three token inputs in field order.
+func (m *Model) tokenInputs() []*textinput.Model {
+	return []*textinput.Model{&m.token, &m.appToken, &m.botToken}
+}
+
+func (m *Model) focusToken(field int) tea.Cmd {
+	for _, in := range m.tokenInputs() {
+		in.Blur()
+	}
+	m.tokenField = field
+	return m.tokenInputs()[field].Focus()
 }
 
 func (m Model) identityKey(msg tea.KeyMsg) (Model, tea.Cmd) {

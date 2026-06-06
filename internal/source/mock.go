@@ -35,6 +35,10 @@ func (m *Mock) History(convID string) ([]data.Message, error) {
 	return out, nil
 }
 
+func (m *Mock) HistoryBefore(convID, beforeTS string) ([]data.Message, error) {
+	return nil, nil // mock has no older history
+}
+
 func (m *Mock) Replies(convID, rootID string) ([]data.Reply, error) {
 	for _, msg := range m.messages[convID] {
 		if msg.ID == rootID {

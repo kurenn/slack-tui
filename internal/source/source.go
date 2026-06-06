@@ -12,6 +12,9 @@ type Source interface {
 	// History fetches recent messages for a conversation (thread replies are
 	// lazy — only ReplyCount is set; call Replies to load them).
 	History(convID string) ([]data.Message, error)
+	// HistoryBefore fetches the page of messages older than beforeTS (oldest
+	// first); empty means there's no more history.
+	HistoryBefore(convID, beforeTS string) ([]data.Message, error)
 	// Replies fetches the replies of a thread root.
 	Replies(convID, rootID string) ([]data.Reply, error)
 	// Send posts a message to a conversation and returns the stored message.

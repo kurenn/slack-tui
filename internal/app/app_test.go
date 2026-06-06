@@ -53,6 +53,31 @@ func TestSettingsPanel(t *testing.T) {
 
 func init() { /* tests drive the model headlessly via Key/WithSize */ }
 
+// TestLoadOlderPrepends: an older page prepends and shifts the selection; an
+// empty page marks the conversation fully loaded.
+func TestLoadOlderPrepends(t *testing.T) {
+	m := newSized()
+	m.msgSel = 0
+	before := len(m.curMsgs())
+	older := []data.Message{
+		{ID: "old1", UserID: "ada", Time: "08:00", Text: "older1"},
+		{ID: "old2", UserID: "lin", Time: "08:01", Text: "older2"},
+	}
+	next, _ := m.Update(olderMsg{convID: m.activeID, msgs: older})
+	m = next.(Model)
+	if len(m.curMsgs()) != before+2 || m.curMsgs()[0].Text != "older1" {
+		t.Fatalf("older page not prepended (len=%d, first=%q)", len(m.curMsgs()), m.curMsgs()[0].Text)
+	}
+	if m.msgSel != 2 {
+		t.Errorf("selection should shift down by the prepended count, got %d", m.msgSel)
+	}
+	next, _ = m.Update(olderMsg{convID: m.activeID, msgs: nil})
+	m = next.(Model)
+	if !m.fullyLoaded[m.activeID] {
+		t.Error("an empty older page should mark the conversation fully loaded")
+	}
+}
+
 // TestJumpToNextUnread: ] hops to the next conversation with unread and marks it read.
 func TestJumpToNextUnread(t *testing.T) {
 	m := newSized() // mock: engineering active; design(1) and incidents(2) unread

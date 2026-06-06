@@ -127,6 +127,11 @@ type (
 		msgs   []data.Message
 		err    error
 	}
+	olderMsg struct {
+		convID string
+		msgs   []data.Message
+		err    error
+	}
 	repliesMsg struct {
 		convID, rootID string
 		replies        []data.Reply
@@ -196,6 +201,33 @@ func (m *Model) applyHistory(convID string, msgs []data.Message) {
 		m.msgSel = max(0, len(msgs)-1)
 	} else {
 		m.msgSel = indexOfMsg(msgs, selID)
+	}
+}
+
+// loadOlderCmd fetches the page of history before the oldest cached message.
+func (m Model) loadOlderCmd(convID string) tea.Cmd {
+	msgs := m.messages[convID]
+	if len(msgs) == 0 {
+		return nil
+	}
+	oldest := msgs[0].ID
+	src := m.src
+	return func() tea.Msg {
+		older, err := src.HistoryBefore(convID, oldest)
+		return olderMsg{convID, older, err}
+	}
+}
+
+// prependHistory prepends an older page, keeping the selection on the same
+// message; an empty page marks the conversation fully loaded.
+func (m *Model) prependHistory(convID string, older []data.Message) {
+	if len(older) == 0 {
+		m.fullyLoaded[convID] = true
+		return
+	}
+	m.messages[convID] = append(older, m.messages[convID]...)
+	if convID == m.activeID {
+		m.msgSel += len(older)
 	}
 }
 

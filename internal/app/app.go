@@ -39,9 +39,10 @@ type Model struct {
 	showHints bool
 	loadErr   error
 
-	messages map[string][]data.Message
-	meta     map[string]components.Meta
-	myStatus string
+	messages    map[string][]data.Message
+	fullyLoaded map[string]bool // conversations with no more older history
+	meta        map[string]components.Meta
+	myStatus    string
 
 	activeID     string
 	focus        string
@@ -131,6 +132,7 @@ func New() Model {
 		showHints:    true,
 		loadErr:      loadErr,
 		messages:     map[string][]data.Message{},
+		fullyLoaded:  map[string]bool{},
 		meta:         meta,
 		myStatus:     prefs.Status,
 		activeID:     activeID,
@@ -225,6 +227,12 @@ func (m *Model) openChannel(id string) tea.Cmd {
 	m.sideSel = m.flatIndexOf(id)
 	m.threadRootID = ""
 	return m.markReadCmd(id) // persist read state to the backend
+}
+
+// atHistoryTop reports whether the message list is focused, scrolled to its
+// first message, and may have more (unloaded) older history.
+func (m Model) atHistoryTop() bool {
+	return m.focus == focusMessages && m.msgSel == 0 && len(m.curMsgs()) > 0 && !m.fullyLoaded[m.activeID]
 }
 
 // jumpUnread opens the next/prev conversation (in sidebar order) with unread,
@@ -354,6 +362,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.applyReplies(msg.convID, msg.rootID, msg.replies)
 		}
 		return m, nil
+	case olderMsg:
+		if msg.err == nil {
+			m.prependHistory(msg.convID, msg.msgs)
+		}
+		return m, nil
 	case eventMsg:
 		m.handleEvent(msg.ev)
 		if s, ok := m.src.(streamer); ok {
@@ -457,6 +470,9 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !m.gPending.IsZero() && time.Since(m.gPending) < 500*time.Millisecond {
 			m.gPending = time.Time{}
 			m.jumpTop()
+			if m.atHistoryTop() {
+				return m, m.loadOlderCmd(m.activeID)
+			}
 		} else {
 			m.gPending = time.Now()
 		}
@@ -467,6 +483,9 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "j", "down":
 		m.moveSel(1)
 	case "k", "up":
+		if m.atHistoryTop() { // at the top of the message list: pull older history
+			return m, m.loadOlderCmd(m.activeID)
+		}
 		m.moveSel(-1)
 
 	case "enter":

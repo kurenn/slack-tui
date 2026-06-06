@@ -219,6 +219,21 @@ func (s *Slack) History(convID string) ([]data.Message, error) {
 	return out, nil
 }
 
+// HistoryBefore fetches the page of messages older than beforeTS.
+func (s *Slack) HistoryBefore(convID, beforeTS string) ([]data.Message, error) {
+	resp, err := s.api.GetConversationHistory(&slack.GetConversationHistoryParameters{
+		ChannelID: convID, Limit: 50, Latest: beforeTS, Inclusive: false,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("history: %w", err)
+	}
+	var out []data.Message
+	for i := len(resp.Messages) - 1; i >= 0; i-- { // API returns newest first
+		out = append(out, s.toMessage(resp.Messages[i]))
+	}
+	return out, nil
+}
+
 func (s *Slack) Send(convID, text string) (data.Message, error) {
 	_, ts, err := s.api.PostMessage(convID, slack.MsgOptionText(text, false), slack.MsgOptionAsUser(true))
 	if err != nil {

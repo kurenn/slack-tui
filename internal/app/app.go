@@ -274,6 +274,45 @@ func (m *Model) scrollMessages(step int) {
 	m.msgExtra = clamp(base+m.msgExtra+step, 0, maxTop) - base
 }
 
+// msgScrollStep is the per-keystroke line step when j/k scrolls within a message
+// taller than the viewport.
+const msgScrollStep = 3
+
+// messagesDown handles j/↓ in the message pane: scroll down through the selected
+// message if it overflows the viewport, otherwise advance to the next message.
+func (m *Model) messagesDown() {
+	msgs := m.curMsgs()
+	ss, se, total, innerH := m.msgGeom()
+	if total > innerH { // there is something to scroll
+		base := windowBaseTop(ss, se, innerH, total)
+		curTop := clamp(base+m.msgExtra, 0, total-innerH)
+		if se > curTop+innerH-1 { // selected message extends below the viewport
+			m.msgExtra = clamp(curTop+msgScrollStep, 0, total-innerH) - base
+			return
+		}
+	}
+	if m.msgSel < len(msgs)-1 {
+		m.msgSel++
+		m.msgExtra = 0
+	}
+}
+
+// messagesUp handles k/↑ in the message pane: scroll back up within a tall
+// message, otherwise move to the previous message.
+func (m *Model) messagesUp() {
+	if m.msgExtra > 0 {
+		ss, se, total, innerH := m.msgGeom()
+		base := windowBaseTop(ss, se, innerH, total)
+		curTop := clamp(base+m.msgExtra, 0, max(0, total-innerH))
+		m.msgExtra = max(0, clamp(curTop-msgScrollStep, 0, max(0, total-innerH))-base)
+		return
+	}
+	if m.msgSel > 0 {
+		m.msgSel--
+		m.msgExtra = 0
+	}
+}
+
 // atHistoryTop reports whether the message list is focused, scrolled to its
 // first message, and may have more (unloaded) older history.
 func (m Model) atHistoryTop() bool {
@@ -530,12 +569,20 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.jumpBottom()
 
 	case "j", "down":
-		m.moveSel(1)
-	case "k", "up":
-		if m.atHistoryTop() { // at the top of the message list: pull older history
-			return m, m.loadOlderCmd(m.activeID)
+		if m.focus == focusMessages {
+			m.messagesDown()
+		} else {
+			m.moveSel(1)
 		}
-		m.moveSel(-1)
+	case "k", "up":
+		if m.focus == focusMessages {
+			if m.atHistoryTop() && m.msgExtra == 0 { // top of the list: pull older history
+				return m, m.loadOlderCmd(m.activeID)
+			}
+			m.messagesUp()
+		} else {
+			m.moveSel(-1)
+		}
 	case "ctrl+d":
 		m.scrollMessages(m.pageJump())
 	case "ctrl+u":

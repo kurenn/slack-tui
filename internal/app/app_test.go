@@ -35,6 +35,30 @@ func TestTallMessageScroll(t *testing.T) {
 	}
 }
 
+// TestTallMessageJK: pressing j repeatedly scrolls down through a tall message
+// (not just jump between messages).
+func TestTallMessageJK(t *testing.T) {
+	m := WithSize(New(), 70, 16)
+	var sb strings.Builder
+	for i := 0; i < 40; i++ {
+		sb.WriteString(fmt.Sprintf("line%02d\n", i))
+	}
+	m.messages[m.activeID] = []data.Message{{ID: "big", UserID: "ada", Time: "09:00", Text: sb.String()}}
+	m.msgSel, m.msgExtra, m.focus = 0, 0, focusMessages
+	for i := 0; i < 60; i++ {
+		m = Key(m, "j")
+	}
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "line39") {
+		t.Errorf("j should scroll through a tall message to its bottom (msgExtra=%d)", m.msgExtra)
+	}
+	for i := 0; i < 60; i++ {
+		m = Key(m, "k")
+	}
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "line00") || m.msgExtra != 0 {
+		t.Errorf("k should scroll back to the top (msgExtra=%d)", m.msgExtra)
+	}
+}
+
 // TestStatusChangePushesPresence: cycling the Status row advances presence and
 // returns a command to push it to the backend.
 func TestStatusChangePushesPresence(t *testing.T) {

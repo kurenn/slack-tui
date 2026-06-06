@@ -6,6 +6,7 @@
 package onboarding
 
 import (
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -165,6 +166,12 @@ func (m Model) finish() (Model, tea.Cmd) {
 		TS:        time.Now().Unix(),
 	}
 	_ = config.Save(prefs)
+	// Persist a pasted user token so the app connects to real Slack on launch.
+	if tok := strings.TrimSpace(m.token.Value()); tok != "" {
+		saved, _ := config.LoadTokens()
+		saved.User = tok
+		_ = config.SaveTokens(saved)
+	}
 	return m, func() tea.Msg { return FinishedMsg{Prefs: prefs} }
 }
 

@@ -4,19 +4,30 @@ A keyboard-first, vim-modal Slack client that runs **inside your terminal**
 (Ghostty et al.) — like `vim` or `lazygit`, not a separate app. Built with
 [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
-> Status: **early scaffold.** The theme system, mock data layer, and the box-drawing
-> Pane primitive are in place and render a static three-pane shell. The keyboard
-> engine, command palette, threads, onboarding, and real Slack integration are
-> being built in sequence (see _Roadmap_).
+> Status: **working client.** Three-pane shell, vim-modal keyboard engine, command
+> palette, threads, full onboarding, and real Slack (Web API reads/sends, presence,
+> Socket Mode live unread). Falls back to a mock workspace when no token is set.
 
 ## Run
 
 ```sh
-go run .           # launch the TUI (currently the static shell)
+go run .                 # launch (mock data if no token; real Slack if a token is set)
 go run . --dump 100x30   # render one frame to stdout (headless / screenshots)
 ```
 
-Press `T` to cycle themes, `q` / `Ctrl-C` to quit.
+### Connecting to Slack
+
+Create an app from `slack-app-manifest.yaml`, then provide a **user token** (`xoxp-…`)
+— either paste it in the onboarding "Paste an auth token" screen (persisted to
+`~/.config/slack-tui/tokens.json`, 0600) or via env var. Env vars override the file:
+
+```sh
+SLACK_USER_TOKEN=xoxp-…                          # required for real Slack
+SLACK_APP_TOKEN=xapp-… SLACK_BOT_TOKEN=xoxb-…    # optional: Socket Mode live channel unread
+```
+
+Keys: `j/k`/`gg`/`G` move · `Tab`/`h`/`l` panes · `t`/`Enter` thread · `i` write ·
+`Ctrl-K` palette · `,` settings · `Ctrl-R` refresh · `q` quit.
 
 ## Design source
 

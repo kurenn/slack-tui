@@ -4,7 +4,6 @@
 package app
 
 import (
-	"os"
 	"strings"
 	"time"
 
@@ -72,9 +71,13 @@ type Model struct {
 func New() Model {
 	prefs, _ := config.Load()
 
+	// Tokens come from the stored file, with env vars overriding per-token.
+	saved, _ := config.LoadTokens()
+	tok := saved.Resolve()
+
 	var src source.Source
-	if tok := os.Getenv("SLACK_USER_TOKEN"); tok != "" {
-		src = source.NewSlack(tok)
+	if tok.User != "" {
+		src = source.NewSlack(tok.User)
 	} else {
 		src = source.NewMock()
 	}
@@ -87,10 +90,8 @@ func New() Model {
 	}
 
 	// Real-time: start Socket Mode if the app + bot tokens are present.
-	if sl, ok := src.(*source.Slack); ok {
-		if app, bot := os.Getenv("SLACK_APP_TOKEN"), os.Getenv("SLACK_BOT_TOKEN"); app != "" && bot != "" {
-			sl.StartSocket(app, bot)
-		}
+	if sl, ok := src.(*source.Slack); ok && tok.App != "" && tok.Bot != "" {
+		sl.StartSocket(tok.App, tok.Bot)
 	}
 
 	// Onboarding hand-off: adopt the chosen handle as the current user's identity.

@@ -49,6 +49,7 @@ type Model struct {
 	insert       bool
 	sideSel      int // flat index into sidebar items
 	msgSel       int
+	msgExtra     int // extra line scroll within the message pane (for tall messages)
 	threadRootID string
 	threadSel    int
 
@@ -226,6 +227,7 @@ func (m *Model) openChannel(id string) tea.Cmd {
 	m.activeID = id
 	m.ensureHistory(id)
 	m.msgSel = max(0, len(m.messages[id])-1)
+	m.msgExtra = 0
 	m.meta[id] = components.Meta{Unread: 0, Mention: false}
 	m.focus = focusMessages
 	m.sideSel = m.flatIndexOf(id)
@@ -239,6 +241,37 @@ func (m Model) pageJump() int {
 		return n
 	}
 	return 1
+}
+
+// msgGeom computes the selected-message line span, total body lines, and the
+// message-pane inner height — for line-accurate scrolling.
+func (m Model) msgGeom() (ss, se, total, innerH int) {
+	centerW := m.width - sidebarWidth - 1
+	if m.threadOpen() {
+		centerW = m.width - sidebarWidth - threadWidth - 2
+	}
+	innerH = (m.height - 2 - composerH) - 2
+	msgs := m.curMsgs()
+	lines, starts := components.MessagesBody(m.pal, m.ws, msgs, m.msgSel, m.focus == focusMessages, m.density, centerW-2)
+	total = len(lines)
+	if n := len(msgs); n > 0 {
+		mi := clamp(m.msgSel, 0, n-1)
+		ss, se = starts[mi], starts[mi+1]-1
+	}
+	return
+}
+
+// scrollMessages line-scrolls the message pane by step (Ctrl-d/Ctrl-u), letting
+// you read through a message taller than the viewport. Other panes move selection.
+func (m *Model) scrollMessages(step int) {
+	if m.focus != focusMessages {
+		m.moveSel(step)
+		return
+	}
+	ss, se, total, innerH := m.msgGeom()
+	base := windowBaseTop(ss, se, innerH, total)
+	maxTop := max(0, total-innerH)
+	m.msgExtra = clamp(base+m.msgExtra+step, 0, maxTop) - base
 }
 
 // atHistoryTop reports whether the message list is focused, scrolled to its
@@ -315,6 +348,7 @@ func (m *Model) sendMessage() {
 	m.messages[m.activeID] = append(m.messages[m.activeID], msg)
 	m.draft.SetValue("")
 	m.msgSel = len(m.messages[m.activeID]) - 1
+	m.msgExtra = 0
 }
 
 func (m *Model) sendReply() {
@@ -503,9 +537,9 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.moveSel(-1)
 	case "ctrl+d":
-		m.moveSel(m.pageJump())
+		m.scrollMessages(m.pageJump())
 	case "ctrl+u":
-		m.moveSel(-m.pageJump())
+		m.scrollMessages(-m.pageJump())
 
 	case "enter":
 		switch m.focus {
@@ -571,6 +605,7 @@ func (m *Model) moveSel(delta int) {
 		m.sideSel = sel[pos]
 	case focusMessages:
 		m.msgSel = clamp(m.msgSel+delta, 0, len(m.curMsgs())-1)
+		m.msgExtra = 0
 	case focusThread:
 		if root, ok := m.threadRoot(); ok {
 			m.threadSel = clamp(m.threadSel+delta, 0, len(root.Replies)-1)
@@ -585,7 +620,7 @@ func (m *Model) jumpTop() {
 			m.sideSel = sel[0]
 		}
 	case focusMessages:
-		m.msgSel = 0
+		m.msgSel, m.msgExtra = 0, 0
 	case focusThread:
 		m.threadSel = 0
 	}
@@ -598,7 +633,7 @@ func (m *Model) jumpBottom() {
 			m.sideSel = sel[len(sel)-1]
 		}
 	case focusMessages:
-		m.msgSel = max(0, len(m.curMsgs())-1)
+		m.msgSel, m.msgExtra = max(0, len(m.curMsgs())-1), 0
 	case focusThread:
 		if root, ok := m.threadRoot(); ok {
 			m.threadSel = max(0, len(root.Replies)-1)
@@ -685,6 +720,16 @@ func windowLines(lines []string, selStart, selEnd, h int) []string {
 	if len(lines) <= h {
 		return lines
 	}
+	top := windowBaseTop(selStart, selEnd, h, len(lines))
+	return lines[top : top+h]
+}
+
+// windowBaseTop is the viewport top that keeps the selection [selStart,selEnd]
+// visible (anchored to its bottom, but never past its top).
+func windowBaseTop(selStart, selEnd, h, total int) int {
+	if h <= 0 || total <= h {
+		return 0
+	}
 	top := 0
 	if selEnd >= h {
 		top = selEnd - h + 1
@@ -692,6 +737,5 @@ func windowLines(lines []string, selStart, selEnd, h int) []string {
 	if selStart < top {
 		top = selStart
 	}
-	top = clamp(top, 0, len(lines)-h)
-	return lines[top : top+h]
+	return clamp(top, 0, total-h)
 }

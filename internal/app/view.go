@@ -112,7 +112,13 @@ func (m Model) renderCenter(conv data.Conversation, w, bodyH int) string {
 		mi := clamp(m.msgSel, 0, n-1)
 		ss, se = starts[mi], starts[mi+1]-1
 	}
-	body := strings.Join(windowLines(lines, ss, se, innerH), "\n")
+	var body string
+	if len(lines) <= innerH {
+		body = strings.Join(lines, "\n")
+	} else { // base scroll keeps the selection visible; msgExtra reads through tall messages
+		top := clamp(windowBaseTop(ss, se, innerH, len(lines))+m.msgExtra, 0, len(lines)-innerH)
+		body = strings.Join(lines[top:top+innerH], "\n")
+	}
 
 	title := "#" + conv.Name
 	right := conv.Topic

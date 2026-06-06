@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -10,6 +11,29 @@ import (
 	"github.com/abrahamkuri/slack-tui/internal/data"
 	"github.com/abrahamkuri/slack-tui/internal/source"
 )
+
+// TestTallMessageScroll: a message taller than the viewport can be read by
+// line-scrolling (Ctrl-d), not just showing its top.
+func TestTallMessageScroll(t *testing.T) {
+	m := WithSize(New(), 70, 16)
+	var sb strings.Builder
+	for i := 0; i < 40; i++ {
+		sb.WriteString(fmt.Sprintf("line%02d\n", i))
+	}
+	m.messages[m.activeID] = []data.Message{{ID: "big", UserID: "ada", Time: "09:00", Text: sb.String()}}
+	m.msgSel, m.msgExtra, m.focus = 0, 0, focusMessages
+
+	top := ansi.Strip(m.View())
+	if !strings.Contains(top, "line00") || strings.Contains(top, "line39") {
+		t.Fatal("initially the top should be visible and the bottom hidden")
+	}
+	for i := 0; i < 40; i++ {
+		m.scrollMessages(m.pageJump())
+	}
+	if bottom := ansi.Strip(m.View()); !strings.Contains(bottom, "line39") {
+		t.Errorf("after scrolling, the bottom of the tall message should be visible (msgExtra=%d)", m.msgExtra)
+	}
+}
 
 // TestStatusChangePushesPresence: cycling the Status row advances presence and
 // returns a command to push it to the backend.

@@ -199,6 +199,7 @@ func (m *Model) applyHistory(convID string, msgs []data.Message) {
 	m.messages[convID] = msgs
 	if atBottom {
 		m.msgSel = max(0, len(msgs)-1)
+		m.msgExtra = 0
 	} else {
 		m.msgSel = indexOfMsg(msgs, selID)
 	}

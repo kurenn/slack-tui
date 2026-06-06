@@ -41,6 +41,7 @@ oauth_config:
       - reactions:read
       - users:write           # set presence (active/away)
       - dnd:write             # Do Not Disturb (snooze)
+      - users.profile:write   # custom status message
     bot:
       - channels:history
       - channels:read

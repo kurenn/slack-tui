@@ -27,6 +27,8 @@ type Source interface {
 	MarkRead(convID, ts string) error
 	// SetPresence sets the user's presence (online | away | dnd) on the backend.
 	SetPresence(status string) error
+	// SetStatusText sets the custom status message (text + optional :emoji:).
+	SetStatusText(text, emoji string) error
 }
 
 // tokenColors is the stable palette of syntax-token color keys assigned to users

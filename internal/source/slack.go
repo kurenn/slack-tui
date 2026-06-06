@@ -180,6 +180,11 @@ func (s *Slack) SetPresence(status string) error {
 	}
 }
 
+// SetStatusText sets the custom status message (text + optional :emoji:).
+func (s *Slack) SetStatusText(text, emoji string) error {
+	return s.api.SetUserCustomStatus(text, emoji, 0)
+}
+
 // fillUnread populates each conversation's unread count via conversations.info,
 // concurrently and bounded, with an overall timeout so startup can't hang.
 func (s *Slack) fillUnread(convs []data.Conversation) {

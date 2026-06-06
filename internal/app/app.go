@@ -62,6 +62,9 @@ type Model struct {
 	settingsOpen bool
 	settingsSel  int
 
+	statusTextOpen  bool
+	statusTextInput textinput.Model
+
 	width, height int
 	gPending      time.Time
 }
@@ -124,22 +127,23 @@ func New() Model {
 	}
 
 	m := Model{
-		src:          src,
-		ws:           ws,
-		prefs:        prefs,
-		pal:          theme.Resolve(prefs.Theme, prefs.Accent),
-		density:      theme.ParseDensity(prefs.Density),
-		showHints:    true,
-		loadErr:      loadErr,
-		messages:     map[string][]data.Message{},
-		fullyLoaded:  map[string]bool{},
-		meta:         meta,
-		myStatus:     prefs.Status,
-		activeID:     activeID,
-		focus:        focusMessages,
-		draft:        mkInput(),
-		threadDraft:  mkInput(),
-		paletteQuery: mkInput(),
+		src:             src,
+		ws:              ws,
+		prefs:           prefs,
+		pal:             theme.Resolve(prefs.Theme, prefs.Accent),
+		density:         theme.ParseDensity(prefs.Density),
+		showHints:       true,
+		loadErr:         loadErr,
+		messages:        map[string][]data.Message{},
+		fullyLoaded:     map[string]bool{},
+		meta:            meta,
+		myStatus:        prefs.Status,
+		activeID:        activeID,
+		focus:           focusMessages,
+		draft:           mkInput(),
+		threadDraft:     mkInput(),
+		paletteQuery:    mkInput(),
+		statusTextInput: mkInput(),
 	}
 	m.ensureHistory(activeID)
 	m.sideSel = m.flatIndexOf(activeID)
@@ -227,6 +231,14 @@ func (m *Model) openChannel(id string) tea.Cmd {
 	m.sideSel = m.flatIndexOf(id)
 	m.threadRootID = ""
 	return m.markReadCmd(id) // persist read state to the backend
+}
+
+// pageJump is the selection step for half-page scrolling (Ctrl-d/Ctrl-u).
+func (m Model) pageJump() int {
+	if n := (m.height - 6) / 4; n > 1 {
+		return n
+	}
+	return 1
 }
 
 // atHistoryTop reports whether the message list is focused, scrolled to its
@@ -382,6 +394,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, m.openPalette()
 		}
+		if m.statusTextOpen {
+			return m.statusTextKey(msg)
+		}
 		if m.settingsOpen {
 			return m.settingsKey(msg)
 		}
@@ -487,6 +502,10 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.loadOlderCmd(m.activeID)
 		}
 		m.moveSel(-1)
+	case "ctrl+d":
+		m.moveSel(m.pageJump())
+	case "ctrl+u":
+		m.moveSel(-m.pageJump())
 
 	case "enter":
 		switch m.focus {

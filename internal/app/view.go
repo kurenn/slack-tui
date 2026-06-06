@@ -71,6 +71,9 @@ func (m Model) View() string {
 	if m.settingsOpen {
 		frame = m.overlaySettings(frame)
 	}
+	if m.statusTextOpen {
+		frame = m.overlayStatusText(frame)
+	}
 	return frame
 }
 

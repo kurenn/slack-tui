@@ -64,9 +64,10 @@ func (m *Mock) SendReply(convID, rootID, text string) (data.Reply, error) {
 	return r, nil
 }
 
-func (m *Mock) Unread(convID string) (int, error) { return 0, nil }
-func (m *Mock) MarkRead(convID, ts string) error  { return nil }
-func (m *Mock) SetPresence(status string) error   { return nil }
+func (m *Mock) Unread(convID string) (int, error)      { return 0, nil }
+func (m *Mock) MarkRead(convID, ts string) error       { return nil }
+func (m *Mock) SetPresence(status string) error        { return nil }
+func (m *Mock) SetStatusText(text, emoji string) error { return nil }
 
 func hm() string    { now := time.Now(); return fmt.Sprintf("%02d:%02d", now.Hour(), now.Minute()) }
 func stamp() string { return strings.TrimPrefix(fmt.Sprintf("%d", time.Now().UnixNano()), "1") }

@@ -227,6 +227,35 @@ func (m *Model) openChannel(id string) tea.Cmd {
 	return m.markReadCmd(id) // persist read state to the backend
 }
 
+// jumpUnread opens the next/prev conversation (in sidebar order) with unread,
+// wrapping around. No-op if nothing is unread.
+func (m *Model) jumpUnread(dir int) tea.Cmd {
+	var ids []string
+	for _, c := range m.ws.Channels {
+		ids = append(ids, c.ID)
+	}
+	for _, c := range m.ws.DMs {
+		ids = append(ids, c.ID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	start := 0
+	for i, id := range ids {
+		if id == m.activeID {
+			start = i
+			break
+		}
+	}
+	for k := 1; k <= len(ids); k++ {
+		i := ((start+dir*k)%len(ids) + len(ids)) % len(ids)
+		if m.meta[ids[i]].Unread > 0 {
+			return m.openChannel(ids[i])
+		}
+	}
+	return nil
+}
+
 func (m *Model) openThread(msgID string) tea.Cmd {
 	m.threadRootID = msgID
 	m.threadSel = 0
@@ -406,6 +435,10 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case ",": // open the settings overlay
 		m.openSettings()
 		return m, nil
+	case "]": // jump to the next conversation with unread
+		return m, m.jumpUnread(1)
+	case "[": // jump to the previous conversation with unread
+		return m, m.jumpUnread(-1)
 
 	case "tab":
 		m.focus = order[(idx+1)%len(order)]

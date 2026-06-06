@@ -53,6 +53,18 @@ func TestSettingsPanel(t *testing.T) {
 
 func init() { /* tests drive the model headlessly via Key/WithSize */ }
 
+// TestJumpToNextUnread: ] hops to the next conversation with unread and marks it read.
+func TestJumpToNextUnread(t *testing.T) {
+	m := newSized() // mock: engineering active; design(1) and incidents(2) unread
+	m.jumpUnread(1)
+	if m.activeID == "engineering" {
+		t.Errorf("] should move to an unread conversation, still %q", m.activeID)
+	}
+	if m.meta[m.activeID].Unread != 0 {
+		t.Errorf("the opened conversation should be marked read, meta=%+v", m.meta[m.activeID])
+	}
+}
+
 // TestPollUpdatesOpenThread reproduces the reported bug: a reply arriving while
 // a thread is open must appear (here delivered as the poll's repliesMsg).
 func TestPollUpdatesOpenThread(t *testing.T) {

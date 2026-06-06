@@ -164,7 +164,17 @@ func (m Model) stage(p theme.Palette) string {
 	case phaseBoot:
 		return bootScreen(p, m.boot.render(p))
 	case phaseOAuth:
-		return bootScreen(p, m.oauth.render(p))
+		body := m.oauth.render(p)
+		switch {
+		case m.oauthErr != "":
+			body = lipgloss.JoinVertical(lipgloss.Left, body, "",
+				lipgloss.NewStyle().Foreground(p.Red).Render("✗ sign-in failed: "+m.oauthErr),
+				lipgloss.NewStyle().Foreground(p.Dim2).Render("press any key to go back · or choose “Paste a token” instead"))
+		case m.oauthRunning:
+			body = lipgloss.JoinVertical(lipgloss.Left, body, "",
+				lipgloss.NewStyle().Foreground(p.Dim2).Render("approve access in your browser · esc to cancel"))
+		}
+		return bootScreen(p, body)
 	case phaseAuth:
 		return bootScreen(p, m.viewAuth(p))
 	case phaseToken:

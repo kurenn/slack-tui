@@ -63,6 +63,9 @@ type Model struct {
 	authSel  int
 	provider string
 
+	oauthRunning bool   // real browser OAuth in flight
+	oauthErr     string // last OAuth failure, shown on the oauth screen
+
 	stepIndex int
 	optSel    int
 	kbDone    bool
@@ -133,6 +136,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	case advanceDrillMsg:
 		return m.advanceDrill()
+	case oauthDoneMsg:
+		m.oauthRunning = false
+		if msg.err != nil {
+			m.oauthErr = msg.err.Error()
+			return m, nil
+		}
+		saved, _ := config.LoadTokens()
+		saved.User, saved.Bot = msg.toks.User, msg.toks.Bot // keep any existing app token
+		_ = config.SaveTokens(saved)
+		m.phase = phaseIdentity
+		return m, m.handle.Focus()
 	case tea.KeyMsg:
 		return m.onKey(msg)
 	}
@@ -150,6 +164,9 @@ func (m Model) onTick() (Model, tea.Cmd) {
 	case phaseOAuth:
 		m.oauth.step()
 		if m.oauth.done {
+			if m.oauthRunning { // real flow: wait for the browser callback
+				return m, nil
+			}
 			m.phase = phaseIdentity
 			return m, m.handle.Focus()
 		}

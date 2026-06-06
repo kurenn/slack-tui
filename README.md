@@ -17,17 +17,32 @@ go run . --dump 100x30   # render one frame to stdout (headless / screenshots)
 
 ### Connecting to Slack
 
-Create an app from `slack-app-manifest.yaml`, then provide a **user token** (`xoxp-…`)
-— either paste it in the onboarding "Paste an auth token" screen (persisted to
-`~/.config/slack-tui/tokens.json`, 0600) or via env var. Env vars override the file:
+Create an app from `slack-app-manifest.yaml`, then connect one of two ways:
+
+**Browser sign-in (recommended).** Copy the app's **Client ID / Secret** (Basic
+Information) into env or `~/.config/slack-tui/oauth.json`, then:
+
+```sh
+SLACK_CLIENT_ID=… SLACK_CLIENT_SECRET=… slack-tui login   # opens the browser, saves tokens
+```
+
+…or pick **"Sign in with Slack"** in onboarding. Tokens are saved to
+`~/.config/slack-tui/tokens.json` (0600).
+
+**Manual token.** Paste a **user token** (`xoxp-…`) in the onboarding token screen,
+or set env vars (env overrides the saved file, per-token):
 
 ```sh
 SLACK_USER_TOKEN=xoxp-…                          # required for real Slack
 SLACK_APP_TOKEN=xapp-… SLACK_BOT_TOKEN=xoxb-…    # optional: Socket Mode live channel unread
 ```
 
-Keys: `j/k`/`gg`/`G` move · `Tab`/`h`/`l` panes · `t`/`Enter` thread · `i` write ·
-`Ctrl-K` palette · `,` settings · `Ctrl-R` refresh · `q` quit.
+The **app-level token** (`xapp-…`) for Socket Mode is never issued by OAuth — set
+it via `SLACK_APP_TOKEN` or the onboarding token form.
+
+Keys: `j/k`/`gg`/`G` move · `Ctrl-d`/`Ctrl-u` scroll · `Tab`/`h`/`l` panes ·
+`t`/`Enter` thread · `i` write · `]`/`[` next/prev unread · `Ctrl-K` palette ·
+`,` settings · `Ctrl-R` refresh · `q` quit.
 
 ## Design source
 

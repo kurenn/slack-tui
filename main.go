@@ -4,20 +4,31 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 
 	"github.com/abrahamkuri/slack-tui/internal/app"
+	"github.com/abrahamkuri/slack-tui/internal/auth"
+	"github.com/abrahamkuri/slack-tui/internal/config"
 	"github.com/abrahamkuri/slack-tui/internal/onboarding"
 	"github.com/abrahamkuri/slack-tui/internal/root"
 )
 
 func main() {
+	if len(os.Args) >= 2 && os.Args[1] == "login" {
+		if err := login(); err != nil {
+			fmt.Fprintln(os.Stderr, "login:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	// FORCE_COLOR makes --dump emit truecolor even without a TTY (for piping a
 	// colored frame into a renderer like `freeze`).
 	if os.Getenv("FORCE_COLOR") != "" {
@@ -59,4 +70,32 @@ func main() {
 		fmt.Fprintln(os.Stderr, "slack-tui:", err)
 		os.Exit(1)
 	}
+}
+
+// login runs the browser OAuth flow on the command line and saves the tokens.
+func login() error {
+	creds := config.LoadOAuthCreds()
+	if !creds.Ready() {
+		return fmt.Errorf("missing app credentials — set SLACK_CLIENT_ID and SLACK_CLIENT_SECRET " +
+			"(from your Slack app's Basic Information), or put them in ~/.config/slack-tui/oauth.json")
+	}
+	fmt.Println("Opening your browser to authorize slack-tui…")
+	fmt.Printf("If it doesn't open, visit:\n  %s\n\n", auth.AuthorizeURL(creds.ClientID, "manual"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	toks, err := auth.Login(ctx, creds)
+	if err != nil {
+		return err
+	}
+	saved, _ := config.LoadTokens()
+	saved.User, saved.Bot = toks.User, toks.Bot // keep any existing app (xapp) token
+	if err := config.SaveTokens(saved); err != nil {
+		return err
+	}
+	fmt.Println("✓ Signed in — tokens saved. Run `slack-tui` to start.")
+	if saved.App == "" {
+		fmt.Println("  (For live channel unread, also set SLACK_APP_TOKEN=xapp-… — OAuth can't issue it.)")
+	}
+	return nil
 }

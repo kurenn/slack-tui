@@ -6,14 +6,20 @@
 #   3. Basic Information → App-Level Tokens → Generate Token and Scopes:
 #        name "socket", scope connections:write → Generate → copy the xapp-… token.
 #   4. Install App → Install to Workspace → Allow.
-#   5. OAuth & Permissions → copy:
-#        User OAuth Token  → xoxp-…   (reads + sends as you)
-#        Bot User OAuth Token → xoxb-…  (Socket Mode event context)
-#   6. In Slack, `/invite @slack-tui` in any channel you want live (Socket Mode
+#   5. In Slack, `/invite @slack-tui` in any channel you want live (Socket Mode
 #      only streams channels/DMs the app is a member of; personal DMs are polled).
 #
-# (redirect_urls for the browser OAuth flow are added later — testing uses the
-#  copied tokens above, no redirect needed.)
+# Two ways to get the user/bot tokens:
+#   A) Browser sign-in (recommended): Basic Information → copy the Client ID and
+#      Client Secret into env (SLACK_CLIENT_ID / SLACK_CLIENT_SECRET) or
+#      ~/.config/slack-tui/oauth.json, then run `slack-tui login` (or pick
+#      "Sign in with Slack" in onboarding). The redirect_url below must be
+#      registered (it is, via this manifest).
+#   B) Manual: OAuth & Permissions → copy the User OAuth Token (xoxp-…) and Bot
+#      User OAuth Token (xoxb-…) and paste them in onboarding / set as env vars.
+#
+# The app-level token (xapp-…, step 3) is for Socket Mode only and is never issued
+# by OAuth — provide it via SLACK_APP_TOKEN or the onboarding token form.
 
 display_information:
   name: slack-tui
@@ -26,6 +32,8 @@ features:
     always_online: false
 
 oauth_config:
+  redirect_urls:
+    - http://localhost:9899/callback   # loopback target for `slack-tui login`
   scopes:
     user:
       - channels:history

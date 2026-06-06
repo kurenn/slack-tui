@@ -1,11 +1,15 @@
 package onboarding
 
 import (
+	"context"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/abrahamkuri/slack-tui/internal/auth"
+	"github.com/abrahamkuri/slack-tui/internal/config"
 )
 
 // ── option data ──────────────────────────────────────────────────────────────
@@ -72,6 +76,18 @@ func (m Model) onKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.boot.fastForward()
 		return m, tea.Tick(350*time.Millisecond, func(time.Time) tea.Msg { return bootAdvanceMsg{} })
 	case phaseOAuth:
+		if m.oauthRunning {
+			if k == "esc" { // cancel the wait, back to the menu
+				m.oauthRunning = false
+				m.phase = phaseAuth
+			}
+			return m, nil
+		}
+		if m.oauthErr != "" { // dismiss the error → back to the menu
+			m.oauthErr = ""
+			m.phase = phaseAuth
+			return m, nil
+		}
 		m.phase = phaseIdentity
 		return m, m.handle.Focus()
 	case phaseAuth:
@@ -115,10 +131,41 @@ func (m Model) chooseAuth(opt authOpt) (Model, tea.Cmd) {
 	case "guest":
 		m.phase = phaseIdentity
 		return m, m.handle.Focus()
-	default: // slack | sso
+	case "slack":
+		if creds := config.LoadOAuthCreds(); creds.Ready() {
+			m.phase = phaseOAuth
+			m.oauthRunning = true
+			m.oauthErr = ""
+			m.oauth = newTypewriter([]tline{
+				{text: "[ oauth ] sign in with Slack", class: "accent"},
+				{text: "opening the authorization page in your browser…", class: "dim"},
+				{text: "  ↳ " + auth.RedirectURI, class: "fill"},
+				{text: "waiting for you to approve access in Slack…", class: "ok"},
+			})
+			return m, tea.Batch(tick(m.speedMS()), oauthCmd(creds))
+		}
+		// No app credentials configured — fall back to pasting a token.
+		m.provider = "token"
+		m.phase = phaseToken
+		return m, m.focusToken(0)
+	default: // sso (simulated)
 		m.phase = phaseOAuth
 		m.oauth = newTypewriter(oauthLines(opt.id))
 		return m, tick(m.speedMS())
+	}
+}
+
+type oauthDoneMsg struct {
+	toks config.Tokens
+	err  error
+}
+
+func oauthCmd(creds config.OAuthCreds) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		toks, err := auth.Login(ctx, creds)
+		return oauthDoneMsg{toks: toks, err: err}
 	}
 }
 

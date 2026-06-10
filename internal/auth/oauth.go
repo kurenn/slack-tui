@@ -33,7 +33,7 @@ const (
 // UserScopes / BotScopes mirror slack-app-manifest.yaml.
 var (
 	UserScopes = []string{
-		"channels:history", "channels:read", "channels:join", "groups:history",
+		"channels:history", "channels:read", "channels:write", "groups:history",
 		"groups:read", "im:history", "im:read", "mpim:history", "mpim:read",
 		"users:read", "chat:write", "reactions:read", "reactions:write",
 		"users:write", "dnd:write", "users.profile:write", "search:read",

@@ -38,7 +38,7 @@ oauth_config:
     user:
       - channels:history
       - channels:read
-      - channels:join        # browse & join channels (palette)
+      - channels:write       # browse & join channels (palette)
       - groups:history
       - groups:read
       - im:history

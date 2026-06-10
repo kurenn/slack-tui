@@ -91,7 +91,7 @@ slack-tui          # no token? you get a mock workspace to play with
       "user": [
         "channels:history",
         "channels:read",
-        "channels:join",
+        "channels:write",
         "groups:history",
         "groups:read",
         "im:history",

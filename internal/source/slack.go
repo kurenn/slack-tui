@@ -562,7 +562,7 @@ func (s *Slack) Joinable() ([]data.Conversation, error) {
 	return out, nil
 }
 
-// Join joins a public channel (needs the channels:join scope).
+// Join joins a public channel (needs the channels:write user scope).
 func (s *Slack) Join(convID string) (data.Conversation, error) {
 	ch, _, _, err := s.api.JoinConversation(convID)
 	if err != nil {

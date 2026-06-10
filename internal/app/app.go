@@ -776,11 +776,11 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focus = order[(idx+1)%len(order)]
 	case "shift+tab":
 		m.focus = order[(idx-1+len(order))%len(order)]
-	case "h", "ctrl+h":
+	case "h", "ctrl+h", "left":
 		if idx > 0 {
 			m.focus = order[idx-1]
 		}
-	case "l", "ctrl+l":
+	case "l", "ctrl+l", "right":
 		if idx < len(order)-1 {
 			m.focus = order[idx+1]
 		}

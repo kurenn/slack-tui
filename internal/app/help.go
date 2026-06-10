@@ -14,10 +14,10 @@ import (
 type helpRow struct{ keys, desc string }
 
 var helpRows = []helpRow{
-	{"j / k", "move · scroll tall messages"},
+	{"j / k · ↓ / ↑", "move · scroll tall messages"},
 	{"gg / G", "jump to top / bottom"},
 	{"ctrl+d / ctrl+u", "half-page scroll"},
-	{"tab / h / l", "switch panes"},
+	{"tab · h / l · ← / →", "switch panes"},
 	{"enter / t", "open thread"},
 	{"i", "write message"},
 	{"r", "reply in thread"},

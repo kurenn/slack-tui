@@ -243,6 +243,28 @@ func TestFocusCycling(t *testing.T) {
 	}
 }
 
+// TestArrowKeysMirrorHJKL: ←/→ switch panes like h/l (↑/↓ already mirror j/k).
+func TestArrowKeysMirrorHJKL(t *testing.T) {
+	m := newSized()
+	m = Key(m, "left")
+	if m.focus != focusSidebar {
+		t.Errorf("after ← focus = %q, want sidebar", m.focus)
+	}
+	m = Key(m, "right")
+	if m.focus != focusMessages {
+		t.Errorf("after → focus = %q, want messages", m.focus)
+	}
+	last := len(m.curMsgs()) - 1
+	m = Key(m, "up")
+	if m.msgSel != last-1 {
+		t.Errorf("after ↑ msgSel = %d, want %d", m.msgSel, last-1)
+	}
+	m = Key(m, "down")
+	if m.msgSel != last {
+		t.Errorf("after ↓ msgSel = %d, want %d", m.msgSel, last)
+	}
+}
+
 func TestOpenAndCloseThread(t *testing.T) {
 	m := newSized()
 	// engineering's last message (e5) has no replies; move to e3 which does.

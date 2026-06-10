@@ -157,8 +157,8 @@ unread badges refresh on a slow poll instead.
 
 | | |
 |---|---|
-| `j/k` `gg/G` `Ctrl-d/u` | move · jump · half-page |
-| `Tab` `h/l` | switch panes |
+| `j/k` `gg/G` `Ctrl-d/u` | move · jump · half-page (arrows work too) |
+| `Tab` `h/l` `←/→` | switch panes |
 | `Enter` / `t` | open thread |
 | `i` · `r` | write · reply in thread |
 | `Alt-Enter` | newline in the composer |

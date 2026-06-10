@@ -33,9 +33,26 @@ Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
 ## Install
 
+**Homebrew** (macOS):
+
+```sh
+brew install kurenn/tap/slack-tui
+```
+
+**Install script** (macOS/Linux — verifies checksums, no Go needed):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/kurenn/slack-tui/main/install.sh | sh
+```
+
+**Go:**
+
 ```sh
 go install github.com/kurenn/slack-tui@latest
 ```
+
+> `go install` puts the binary in `$(go env GOPATH)/bin` (usually `~/go/bin`) —
+> make sure that's on your `PATH`, then check with `slack-tui --version`.
 
 …or grab a binary from the [releases page](https://github.com/kurenn/slack-tui/releases).
 

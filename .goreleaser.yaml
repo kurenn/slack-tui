@@ -48,11 +48,15 @@ release:
   draft: false
   prerelease: auto
 
-# To distribute via Homebrew, create a `homebrew-tap` repo and uncomment:
-# brews:
-#   - repository:
-#       owner: kurenn
-#       name: homebrew-tap
-#     homepage: https://github.com/kurenn/slack-tui
-#     description: A keyboard-first terminal Slack client
-#     license: MIT
+# Publishes the cask to kurenn/homebrew-tap on each release (macOS; Linux
+# users have install.sh). Needs the HOMEBREW_TAP_TOKEN repo secret (a
+# fine-grained PAT with contents:write on the tap repo) — the default
+# GITHUB_TOKEN can't push across repos.
+homebrew_casks:
+  - repository:
+      owner: kurenn
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Casks
+    homepage: https://github.com/kurenn/slack-tui
+    description: A keyboard-first terminal Slack client

@@ -2,7 +2,10 @@ package source
 
 import (
 	"regexp"
+	"strings"
 	"testing"
+
+	"github.com/slack-go/slack"
 
 	"github.com/kurenn/slack-tui/internal/data"
 )
@@ -67,6 +70,55 @@ func TestEncodeMentions(t *testing.T) {
 		if got := s.encodeMentions(c.in); got != c.want {
 			t.Errorf("encodeMentions(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// TestBlockKitFallback: bot replies are often blocks with an empty top-level
+// text — they must render, not show up as silent blank messages.
+func TestBlockKitFallback(t *testing.T) {
+	s := &Slack{users: map[string]data.User{}}
+	m := slack.Message{Msg: slack.Msg{
+		Timestamp: "1718000000.000100",
+		BotID:     "B123",
+		Username:  "deploybot",
+		Blocks: slack.Blocks{BlockSet: []slack.Block{
+			slack.NewHeaderBlock(slack.NewTextBlockObject("plain_text", "Deploy finished", false, false)),
+			slack.NewSectionBlock(slack.NewTextBlockObject("mrkdwn", "build *#42* is live", false, false), nil, nil),
+			slack.NewContextBlock("", slack.NewTextBlockObject("mrkdwn", "took 41s", false, false)),
+			slack.NewActionBlock("", slack.NewButtonBlockElement("", "v",
+				slack.NewTextBlockObject("plain_text", "Rollback", false, false))),
+		}},
+	}}
+	got := s.toMessage(m)
+	for _, want := range []string{"Deploy finished", "build *#42* is live", "took 41s", "[button: Rollback]"} {
+		if !strings.Contains(got.Text, want) {
+			t.Errorf("blocks fallback missing %q in %q", want, got.Text)
+		}
+	}
+	if got.UserID != "deploybot" {
+		t.Errorf("bot author = %q, want deploybot", got.UserID)
+	}
+}
+
+// TestRichTextFallback: rich_text blocks flatten to readable text.
+func TestRichTextFallback(t *testing.T) {
+	s := &Slack{users: map[string]data.User{"U1": {ID: "U1", Handle: "ada"}}}
+	m := slack.Message{Msg: slack.Msg{
+		Timestamp: "1718000000.000100",
+		User:      "U2",
+		Blocks: slack.Blocks{BlockSet: []slack.Block{
+			slack.NewRichTextBlock("",
+				slack.NewRichTextSection(
+					slack.NewRichTextSectionTextElement("hey ", nil),
+					slack.NewRichTextSectionUserElement("U1", nil),
+					slack.NewRichTextSectionTextElement(" see ", nil),
+					slack.NewRichTextSectionLinkElement("https://x.dev", "", nil),
+				)),
+		}},
+	}}
+	got := s.toMessage(m)
+	if got.Text != "hey @ada see https://x.dev" {
+		t.Errorf("rich text fallback = %q", got.Text)
 	}
 }
 

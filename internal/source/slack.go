@@ -348,7 +348,7 @@ func (s *Slack) Replies(convID, rootID string) ([]data.Reply, error) {
 			if r.Timestamp == rootID { // skip the root itself
 				continue
 			}
-			out = append(out, data.Reply{ID: r.Timestamp, UserID: r.User, Time: tsTime(r.Timestamp), Text: s.renderText(r.Text)})
+			out = append(out, data.Reply{ID: r.Timestamp, UserID: messageAuthor(r), Time: tsTime(r.Timestamp), Text: s.messageText(r)})
 		}
 		if !hasMore || next == "" {
 			return out, nil
@@ -366,10 +366,124 @@ func (s *Slack) mentionsMe(text string) bool {
 		strings.Contains(text, "<!everyone")
 }
 
+// messageText renders a message's body, falling back to its Block Kit blocks —
+// bots commonly send blocks with an empty top-level text, which used to show
+// up as a silent blank message ("the bot isn't responding").
+func (s *Slack) messageText(m slack.Message) string {
+	text := s.renderText(m.Text)
+	if strings.TrimSpace(text) != "" {
+		return text
+	}
+	var lines []string
+	for _, ln := range blocksText(m.Blocks) {
+		lines = append(lines, s.renderText(ln))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// messageAuthor resolves who to display: bot_message-style posts carry no
+// user id, only a bot identity.
+func messageAuthor(m slack.Message) string {
+	if m.User != "" {
+		return m.User
+	}
+	switch {
+	case m.Username != "":
+		return m.Username
+	case m.BotProfile != nil && m.BotProfile.Name != "":
+		return m.BotProfile.Name
+	case m.BotID != "":
+		return "bot"
+	}
+	return m.User
+}
+
+// blocksText flattens Block Kit blocks into mrkdwn lines. Interactive elements
+// can't be driven from a TUI, so buttons render as labeled placeholders.
+func blocksText(blocks slack.Blocks) []string {
+	var out []string
+	add := func(s string) {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	for _, b := range blocks.BlockSet {
+		switch blk := b.(type) {
+		case *slack.SectionBlock:
+			if blk.Text != nil {
+				add(blk.Text.Text)
+			}
+			for _, f := range blk.Fields {
+				add(f.Text)
+			}
+		case *slack.HeaderBlock:
+			if blk.Text != nil {
+				add(blk.Text.Text)
+			}
+		case *slack.ContextBlock:
+			var parts []string
+			for _, el := range blk.ContextElements.Elements {
+				if t, ok := el.(*slack.TextBlockObject); ok {
+					parts = append(parts, t.Text)
+				}
+			}
+			add(strings.Join(parts, " · "))
+		case *slack.ActionBlock:
+			if blk.Elements == nil {
+				continue
+			}
+			var parts []string
+			for _, el := range blk.Elements.ElementSet {
+				if btn, ok := el.(*slack.ButtonBlockElement); ok && btn.Text != nil {
+					parts = append(parts, "[button: "+btn.Text.Text+"]")
+				}
+			}
+			add(strings.Join(parts, " "))
+		case *slack.DividerBlock:
+			add("———")
+		case *slack.ImageBlock:
+			add("[image: " + blk.AltText + "]")
+		case *slack.RichTextBlock:
+			add(richTextText(blk))
+		}
+	}
+	return out
+}
+
+// richTextText flattens a rich_text block's sections into plain mrkdwn.
+func richTextText(rtb *slack.RichTextBlock) string {
+	var b strings.Builder
+	for _, el := range rtb.Elements {
+		sec, ok := el.(*slack.RichTextSection)
+		if !ok {
+			continue
+		}
+		for _, e := range sec.Elements {
+			switch t := e.(type) {
+			case *slack.RichTextSectionTextElement:
+				b.WriteString(t.Text)
+			case *slack.RichTextSectionLinkElement:
+				if t.Text != "" && t.Text != t.URL {
+					b.WriteString(t.Text + " ")
+				}
+				b.WriteString(t.URL)
+			case *slack.RichTextSectionUserElement:
+				b.WriteString("<@" + t.UserID + ">")
+			case *slack.RichTextSectionChannelElement:
+				b.WriteString("<#" + t.ChannelID + ">")
+			case *slack.RichTextSectionEmojiElement:
+				b.WriteString(":" + t.Name + ":")
+			}
+		}
+		b.WriteString("\n")
+	}
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
 func (s *Slack) toMessage(m slack.Message) data.Message {
 	msg := data.Message{
-		ID: m.Timestamp, UserID: m.User, Time: tsTime(m.Timestamp), Day: tsDay(m.Timestamp),
-		Text: s.renderText(m.Text), ReplyCount: m.ReplyCount, MentionsMe: s.mentionsMe(m.Text),
+		ID: m.Timestamp, UserID: messageAuthor(m), Time: tsTime(m.Timestamp), Day: tsDay(m.Timestamp),
+		Text: s.messageText(m), ReplyCount: m.ReplyCount, MentionsMe: s.mentionsMe(m.Text),
 	}
 	// Uploads and attachments land in Extra (annotations rendered after the
 	// body) and Links (permalinks for the `o` open action).

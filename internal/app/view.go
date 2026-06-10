@@ -161,8 +161,8 @@ func (m Model) renderCenter(conv data.Conversation, w, bodyH int) string {
 		prompt = "✎"
 		m.draft.Placeholder = "edit message"
 	}
-	m.draft.SetWidth(max(4, innerW-24))
-	m.draft.SetHeight(m.composerHeight() - 2)
+	// width/height live on the persistent model (syncComposerSizes) — sizing a
+	// render copy would leave the real textarea repositioning at a stale size.
 	composer := components.Composer(m.pal, prompt, m.draft.View(), insertHere, w)
 
 	return lipgloss.JoinVertical(lipgloss.Left, msgsPane, composer)
@@ -195,8 +195,6 @@ func (m Model) renderThread(conv data.Conversation, bodyH int) string {
 		prompt = "❯"
 	}
 	m.threadDraft.Placeholder = "reply in thread"
-	m.threadDraft.SetWidth(max(4, innerW-24))
-	m.threadDraft.SetHeight(m.threadComposerHeight() - 2)
 	composer := components.Composer(m.pal, prompt, m.threadDraft.View(), insertHere, innerW)
 
 	body := strings.Join(windowed, "\n") + "\n" + composer

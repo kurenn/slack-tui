@@ -12,6 +12,7 @@ func Dump(m Model, w, h int) string {
 // WithSize returns a copy of the model sized to w×h (test helper).
 func WithSize(m Model, w, h int) Model {
 	m.width, m.height = w, h
+	m.syncComposerSizes()
 	return m
 }
 

@@ -33,17 +33,66 @@ const (
 	focusThread   = "thread"
 )
 
-// composerLines is how many draft lines the composer shows before scrolling.
+// composerLines is how many draft rows the composer shows before scrolling.
 const maxComposerLines = 4
 
-// composerHeight is the center composer's total height (borders + draft lines).
+// draftWidth / threadDraftWidth mirror the textarea widths set at render time —
+// height math must wrap at the same column the textarea does.
+func (m Model) draftWidth() int {
+	centerW := m.width - sidebarWidth - 1
+	if m.threadOpen() {
+		centerW = m.width - sidebarWidth - threadWidth - 2
+	}
+	return max(4, (centerW - 2) - 24)
+}
+
+func (m Model) threadDraftWidth() int {
+	return max(4, (threadWidth - 2) - 24)
+}
+
+// wrappedRows counts the display rows value occupies in a textarea of width w —
+// logical lines plus soft-wrapping (pasted code often has lines wider than the
+// composer; counting only "\n" would leave the box too short to show them).
+func wrappedRows(value string, w int) int {
+	if w < 1 {
+		return 1
+	}
+	rows := 0
+	for _, ln := range strings.Split(value, "\n") {
+		rows += lipgloss.Width(ln)/w + 1 // textarea wraps the cursor cell too
+	}
+	return max(1, rows)
+}
+
+// composerHeight is the center composer's total height (borders + draft rows).
 func (m Model) composerHeight() int {
-	return 2 + clamp(strings.Count(m.draft.Value(), "\n")+1, 1, maxComposerLines)
+	return 2 + clamp(wrappedRows(m.draft.Value(), m.draftWidth()), 1, maxComposerLines)
 }
 
 // threadComposerHeight is the thread composer's total height.
 func (m Model) threadComposerHeight() int {
-	return 2 + clamp(strings.Count(m.threadDraft.Value(), "\n")+1, 1, maxComposerLines)
+	return 2 + clamp(wrappedRows(m.threadDraft.Value(), m.threadDraftWidth()), 1, maxComposerLines)
+}
+
+// syncComposerSizes pushes the current geometry into the persistent textareas.
+// This must happen at update time (not on render copies): the textarea
+// repositions its viewport to the cursor inside Update, using whatever size it
+// has then — sizing only a render copy leaves the real one at a stale height,
+// which is how pasted code ended up typing into an invisible row.
+func (m *Model) syncComposerSizes() {
+	m.draft.SetWidth(m.draftWidth())
+	m.draft.SetHeight(m.composerHeight() - 2)
+	m.threadDraft.SetWidth(m.threadDraftWidth())
+	m.threadDraft.SetHeight(m.threadComposerHeight() - 2)
+	// Settle the viewports: the textarea only loads content into its viewport
+	// during View, and only repositions to the cursor during Update — so a
+	// paste that grows the box and moves the cursor in one event would stay
+	// scrolled wrong until the next keystroke. View-then-Update(nil) runs both
+	// steps now, against the new size.
+	_ = m.draft.View()
+	m.draft, _ = m.draft.Update(nil)
+	_ = m.threadDraft.View()
+	m.threadDraft, _ = m.threadDraft.Update(nil)
 }
 
 // Model is the application state.
@@ -303,6 +352,7 @@ func (m *Model) openChannel(id string) tea.Cmd {
 	if id != m.activeID { // park the unsent draft; restore the target's
 		m.drafts[m.activeID] = m.draft.Value()
 		m.draft.SetValue(m.drafts[id])
+		m.syncComposerSizes()
 	}
 	unread := m.meta[id].Unread // captured before clearing — drives the ── new ── rule
 	m.activeID = id
@@ -477,12 +527,14 @@ func (m *Model) openThread(msgID string) tea.Cmd {
 	m.threadRootID = msgID
 	m.threadSel = 0
 	m.focus = focusThread
+	m.syncComposerSizes() // the center pane narrows when the thread opens
 	return m.repliesCmd(m.activeID, msgID)
 }
 
 func (m *Model) closeThread() {
 	m.threadRootID = ""
 	m.focus = focusMessages
+	m.syncComposerSizes()
 }
 
 func (m *Model) enterInsert(which string) tea.Cmd {
@@ -518,6 +570,7 @@ func (m *Model) sendMessage() tea.Cmd {
 		data.Message{ID: pid, UserID: m.ws.MeID, Time: nowClock(), Text: text})
 	m.draft.SetValue("")
 	m.clearSuggest()
+	m.syncComposerSizes()
 	m.msgSel = len(m.messages[m.activeID]) - 1
 	m.msgExtra = 0
 	src, conv := m.src, m.activeID
@@ -540,6 +593,7 @@ func (m *Model) sendReply() tea.Cmd {
 	})
 	m.threadDraft.SetValue("")
 	m.clearSuggest()
+	m.syncComposerSizes()
 	src, conv, root := m.src, m.activeID, m.threadRootID
 	return func() tea.Msg {
 		r, err := src.SendReply(conv, root, text)
@@ -565,6 +619,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.syncComposerSizes()
 		return m, nil
 	case pollMsg:
 		return m, tea.Batch(pollTick(), m.refresh(), m.markReadCmd(m.activeID))
@@ -747,6 +802,7 @@ func (m Model) insertKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	} else {
 		m.draft, cmd = m.draft.Update(msg)
 	}
+	m.syncComposerSizes() // the content may have grown/shrunk the composer
 	m.recomputeSuggest()
 	return m, cmd
 }
@@ -1010,6 +1066,7 @@ func (m *Model) applySent(msg sentMsg) tea.Cmd {
 		}
 		if msg.convID == m.activeID && strings.TrimSpace(m.draft.Value()) == "" {
 			m.draft.SetValue(msg.text) // give the user their words back
+			m.syncComposerSizes()
 		}
 		return m.flash(msg.err)
 	}

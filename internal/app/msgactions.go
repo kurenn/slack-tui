@@ -110,6 +110,7 @@ func (m *Model) startEdit(msg data.Message) tea.Cmd {
 	m.editingID = msg.ID
 	m.prevDraft = m.draft.Value()
 	m.draft.SetValue(msg.Text)
+	m.syncComposerSizes()
 	return m.enterInsert(focusMessages)
 }
 
@@ -118,6 +119,7 @@ func (m *Model) cancelEdit() {
 	m.editingID = ""
 	m.draft.SetValue(m.prevDraft)
 	m.prevDraft = ""
+	m.syncComposerSizes()
 }
 
 // applyEditDraft saves the edited text: optimistic local swap + chat.update.

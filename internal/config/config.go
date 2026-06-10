@@ -36,24 +36,73 @@ func Defaults() Prefs {
 	}
 }
 
-// Path returns the prefs file location, honoring XDG_CONFIG_HOME.
-func Path() (string, error) {
-	dir, err := os.UserConfigDir()
+// Dir returns slack-tui's config directory: $XDG_CONFIG_HOME/slack-tui, or
+// ~/.config/slack-tui. That's the conventional home for terminal tools on
+// every platform — Go's os.UserConfigDir points at Library/Application
+// Support on macOS, where nobody looks for a TUI's config.
+func Dir() (string, error) {
+	if x := os.Getenv("XDG_CONFIG_HOME"); x != "" {
+		return filepath.Join(x, "slack-tui"), nil
+	}
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "slack-tui", "prefs.json"), nil
+	return filepath.Join(home, ".config", "slack-tui"), nil
+}
+
+// legacyDir is the pre-v0.1.7 location (os.UserConfigDir — Library/Application
+// Support on macOS). Reads fall back to it so existing installs keep working;
+// writes always go to Dir.
+func legacyDir() (string, error) {
+	d, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(d, "slack-tui"), nil
+}
+
+// readConfigFile loads name from the config dir, falling back to the legacy
+// dir for files written by older versions.
+func readConfigFile(name string) ([]byte, error) {
+	if dir, err := Dir(); err == nil {
+		if b, err := os.ReadFile(filepath.Join(dir, name)); err == nil {
+			return b, nil
+		}
+	}
+	dir, err := legacyDir()
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(filepath.Join(dir, name))
+}
+
+// writeConfigFile saves name into the config dir with the given permissions.
+func writeConfigFile(name string, b []byte, perm os.FileMode) error {
+	dir, err := Dir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, name), b, perm)
+}
+
+// Path returns the prefs file location.
+func Path() (string, error) {
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "prefs.json"), nil
 }
 
 // Load reads saved prefs, merging over Defaults. A missing file is not an error:
 // it returns Defaults with ok=false so callers can route to onboarding.
 func Load() (prefs Prefs, ok bool) {
 	prefs = Defaults()
-	path, err := Path()
-	if err != nil {
-		return prefs, false
-	}
-	b, err := os.ReadFile(path)
+	b, err := readConfigFile("prefs.json")
 	if err != nil {
 		return prefs, false
 	}
@@ -67,18 +116,11 @@ func Load() (prefs Prefs, ok bool) {
 
 // Save writes prefs to the config file, creating the directory if needed.
 func Save(p Prefs) error {
-	path, err := Path()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	b, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0o644)
+	return writeConfigFile("prefs.json", b, 0o644)
 }
 
 func merge(dst *Prefs, src Prefs) {

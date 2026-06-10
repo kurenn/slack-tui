@@ -17,21 +17,17 @@ type Tokens struct {
 
 // TokensPath returns the tokens file location (~/.config/slack-tui/tokens.json).
 func TokensPath() (string, error) {
-	dir, err := os.UserConfigDir()
+	dir, err := Dir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "slack-tui", "tokens.json"), nil
+	return filepath.Join(dir, "tokens.json"), nil
 }
 
 // LoadTokens reads the saved tokens (zero value if none).
 func LoadTokens() (Tokens, error) {
 	var t Tokens
-	path, err := TokensPath()
-	if err != nil {
-		return t, err
-	}
-	b, err := os.ReadFile(path)
+	b, err := readConfigFile("tokens.json")
 	if err != nil {
 		return t, err
 	}
@@ -40,18 +36,11 @@ func LoadTokens() (Tokens, error) {
 
 // SaveTokens writes the tokens file with owner-only permissions (0600).
 func SaveTokens(t Tokens) error {
-	path, err := TokensPath()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	b, err := json.MarshalIndent(t, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0o600)
+	return writeConfigFile("tokens.json", b, 0o600)
 }
 
 // Resolve returns the effective tokens: an environment variable overrides the

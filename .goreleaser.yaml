@@ -48,15 +48,20 @@ release:
   draft: false
   prerelease: auto
 
-# Publishes the cask to kurenn/homebrew-tap on each release (macOS; Linux
-# users have install.sh). Needs the HOMEBREW_TAP_TOKEN repo secret (a
-# fine-grained PAT with contents:write on the tap repo) — the default
-# GITHUB_TOKEN can't push across repos.
-homebrew_casks:
+# Publishes a formula to kurenn/homebrew-tap on each release. Deliberately a
+# formula and NOT the newer homebrew_casks: casks run Gatekeeper on install,
+# which blocks our unsigned (not notarized) binaries — formulae install
+# without quarantine, the standard path for Go CLIs. Needs the
+# HOMEBREW_TAP_TOKEN repo secret (a fine-grained PAT with contents:write on
+# the tap repo) — the default GITHUB_TOKEN can't push across repos.
+brews:
   - repository:
       owner: kurenn
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    directory: Casks
+    directory: Formula
     homepage: https://github.com/kurenn/slack-tui
     description: A keyboard-first terminal Slack client
+    license: MIT
+    test: |
+      system "#{bin}/slack-tui", "--version"

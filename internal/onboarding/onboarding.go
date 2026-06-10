@@ -12,8 +12,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/abrahamkuri/slack-tui/internal/config"
-	"github.com/abrahamkuri/slack-tui/internal/theme"
+	"github.com/kurenn/slack-tui/internal/config"
+	"github.com/kurenn/slack-tui/internal/theme"
 )
 
 // Phases of the flow.

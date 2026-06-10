@@ -3,10 +3,11 @@ package components
 import (
 	"fmt"
 	"strings"
+	"time"
 
-	"github.com/abrahamkuri/slack-tui/internal/data"
-	"github.com/abrahamkuri/slack-tui/internal/markup"
-	"github.com/abrahamkuri/slack-tui/internal/theme"
+	"github.com/kurenn/slack-tui/internal/data"
+	"github.com/kurenn/slack-tui/internal/markup"
+	"github.com/kurenn/slack-tui/internal/theme"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -16,15 +17,39 @@ const timeGutter = 6 // "09:21 "
 // line index of each message (with a trailing sentinel = total line count), so
 // the caller can scroll the selected message into view. The cursor/mention
 // highlight only shows when focused.
-func MessagesBody(p theme.Palette, ws *data.Workspace, msgs []data.Message, selIndex int, focused bool, density theme.Density, innerW int) (lines []string, starts []int) {
-	lines = append(lines, dayBreak(p, innerW), "")
+func MessagesBody(p theme.Palette, ws *data.Workspace, msgs []data.Message, selIndex int, focused bool, density theme.Density, innerW int, newMarkID string) (lines []string, starts []int) {
+	today := time.Now().Format("Mon Jan 2")
+	if len(msgs) == 0 || msgs[0].Day == "" { // dateless data (mock): single "today" rule
+		lines = append(lines, dayBreak(p, " today ", innerW), "")
+	}
 	gap := density.MsgGap() + 1 // blank lines between author groups
-	prevUser := ""
+	prevUser, prevDay := "", ""
 	for i, msg := range msgs {
+		dayChanged := msg.Day != "" && msg.Day != prevDay
+		if dayChanged {
+			label := " " + msg.Day + " "
+			if msg.Day == today {
+				label = " today "
+			}
+			if i > 0 {
+				lines = append(lines, "")
+			}
+			lines = append(lines, dayBreak(p, label, innerW), "")
+			prevDay = msg.Day
+			prevUser = "" // a new day always re-shows the author header
+		}
+		marked := newMarkID != "" && msg.ID == newMarkID
+		if marked { // the ── new ── rule sits right above the first unread message
+			if i > 0 && !dayChanged {
+				lines = append(lines, "")
+			}
+			lines = append(lines, newBreak(p, innerW), "")
+			prevUser = ""
+		}
 		// Group consecutive messages from the same author: only the first shows
 		// the name/time header; groups are separated by a blank line.
 		grouped := i > 0 && msg.UserID == prevUser
-		if i > 0 && !grouped {
+		if i > 0 && !grouped && !dayChanged && !marked {
 			for g := 0; g < gap; g++ {
 				lines = append(lines, "")
 			}
@@ -37,8 +62,18 @@ func MessagesBody(p theme.Palette, ws *data.Workspace, msgs []data.Message, selI
 	return lines, starts
 }
 
-func dayBreak(p theme.Palette, w int) string {
-	label := " today "
+// newBreak is the unread marker rule (── new ──), drawn in the mention hue.
+func newBreak(p theme.Palette, w int) string {
+	label := " new "
+	side := (w - lipgloss.Width(label)) / 2
+	if side < 0 {
+		side = 0
+	}
+	rule := lipgloss.NewStyle().Foreground(p.Orange).Render(strings.Repeat("─", side))
+	return rule + lipgloss.NewStyle().Foreground(p.Orange).Bold(true).Render(label) + rule
+}
+
+func dayBreak(p theme.Palette, label string, w int) string {
 	side := (w - lipgloss.Width(label)) / 2
 	if side < 0 {
 		side = 0
@@ -66,6 +101,12 @@ func messageLines(p theme.Palette, ws *data.Workspace, msg data.Message, w int, 
 	for _, ln := range strings.Split(markup.Render(p, msg.Text), "\n") {
 		for _, wrapped := range Wrap(ln, bodyW) {
 			out = append(out, strings.Repeat(" ", timeGutter)+wrapped)
+		}
+	}
+	for _, ex := range msg.Extra { // file/attachment annotations, dimmed
+		dim := lipgloss.NewStyle().Foreground(p.Dim)
+		for _, wrapped := range Wrap(ex, bodyW) {
+			out = append(out, strings.Repeat(" ", timeGutter)+dim.Render(wrapped))
 		}
 	}
 	if len(msg.Reactions) > 0 {

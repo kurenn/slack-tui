@@ -35,11 +35,18 @@ type Reply struct {
 
 // Message is a top-level message in a conversation. ReplyCount is the thread
 // size even when Replies haven't been fetched yet (lazy load on thread open).
+// Day ("Mon Jan 2") drives the date separators; empty means unknown (mock).
+// Extra holds non-text annotations ([file: …]) rendered after the body — kept
+// out of Text so editing a message never sends placeholders to the backend.
+// Links holds file/attachment permalinks for the `o` open-link action.
 type Message struct {
 	ID         string
 	UserID     string
 	Time       string
+	Day        string
 	Text       string
+	Extra      []string
+	Links      []string
 	Reactions  []Reaction
 	Replies    []Reply
 	ReplyCount int

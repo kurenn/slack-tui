@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/abrahamkuri/slack-tui/internal/theme"
+	"github.com/kurenn/slack-tui/internal/theme"
 )
 
 var stepKicker = map[string]string{

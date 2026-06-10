@@ -1,25 +1,39 @@
 package app
 
 import (
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/abrahamkuri/slack-tui/internal/data"
-	"github.com/abrahamkuri/slack-tui/internal/source"
+	"github.com/kurenn/slack-tui/internal/data"
+	"github.com/kurenn/slack-tui/internal/source"
 )
 
 // dmPollInterval refreshes DM unread counts — Socket Mode can't see personal DMs.
 const dmPollInterval = 45 * time.Second
 
+// chanPollInterval refreshes channel unread counts when Socket Mode isn't
+// running (user token only) — without it the sidebar badges would freeze at
+// their startup values.
+const chanPollInterval = 90 * time.Second
+
 type (
-	dmPollMsg struct{}
+	dmPollMsg   struct{}
+	chanPollMsg struct{}
+	// unreadMsg carries the unread counts actually fetched this round (a
+	// rate-limit abort returns a partial map; absent ids stay untouched).
 	unreadMsg struct{ counts map[string]int }
 )
 
 func dmPollTick() tea.Cmd {
 	return tea.Tick(dmPollInterval, func(time.Time) tea.Msg { return dmPollMsg{} })
+}
+
+func chanPollTick() tea.Cmd {
+	return tea.Tick(chanPollInterval, func(time.Time) tea.Msg { return chanPollMsg{} })
 }
 
 type presenceMsg struct{ err error }
@@ -43,37 +57,102 @@ func (m Model) markReadCmd(convID string) tea.Cmd {
 	return func() tea.Msg { _ = src.MarkRead(convID, ts); return nil }
 }
 
-// dmUnreadCmd fetches unread counts for all DMs (except the active one),
-// concurrently, off the UI thread.
-func (m Model) dmUnreadCmd() tea.Cmd {
-	src := m.src
-	active := m.activeID
+// dmIDs / chanIDs list the conversations to poll, excluding the active one.
+func (m Model) dmIDs() []string {
 	ids := make([]string, 0, len(m.ws.DMs))
 	for _, d := range m.ws.DMs {
-		if d.ID != active {
+		if d.ID != m.activeID {
 			ids = append(ids, d.ID)
 		}
 	}
+	return ids
+}
+
+func (m Model) chanIDs() []string {
+	ids := make([]string, 0, len(m.ws.Channels))
+	for _, c := range m.ws.Channels {
+		if c.ID != m.activeID {
+			ids = append(ids, c.ID)
+		}
+	}
+	return ids
+}
+
+// unreadCmd fetches unread counts for the given conversations, concurrently,
+// off the UI thread. On a rate-limit error it stops issuing further calls and
+// reports only what it fetched.
+func (m Model) unreadCmd(ids []string) tea.Cmd {
+	if len(ids) == 0 {
+		return nil
+	}
+	src := m.src
 	return func() tea.Msg {
 		counts := map[string]int{}
-		sem := make(chan struct{}, 12)
+		sem := make(chan struct{}, 8)
 		var wg sync.WaitGroup
 		var mu sync.Mutex
+		var limited atomic.Bool
 		for _, id := range ids {
 			wg.Add(1)
 			go func(id string) {
 				defer wg.Done()
 				sem <- struct{}{}
 				defer func() { <-sem }()
-				if n, err := src.Unread(id); err == nil && n > 0 {
-					mu.Lock()
-					counts[id] = n
-					mu.Unlock()
+				if limited.Load() {
+					return
 				}
+				n, err := src.Unread(id)
+				if err != nil {
+					if source.IsRateLimited(err) {
+						limited.Store(true) // back off; finish this round with what we have
+					}
+					return
+				}
+				mu.Lock()
+				counts[id] = n
+				mu.Unlock()
 			}(id)
 		}
 		wg.Wait()
 		return unreadMsg{counts}
+	}
+}
+
+// markAllReadCmd marks each conversation read on the backend up to its latest
+// message (fetched if not cached). Used by the palette's "Mark all as read".
+func (m Model) markAllReadCmd(ids []string) tea.Cmd {
+	if len(ids) == 0 {
+		return nil
+	}
+	src := m.src
+	latest := map[string]string{}
+	for _, id := range ids {
+		if msgs := m.messages[id]; len(msgs) > 0 {
+			latest[id] = msgs[len(msgs)-1].ID
+		}
+	}
+	return func() tea.Msg {
+		sem := make(chan struct{}, 4)
+		var wg sync.WaitGroup
+		for _, id := range ids {
+			wg.Add(1)
+			go func(id string) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				ts := latest[id]
+				if ts == "" {
+					msgs, err := src.History(id)
+					if err != nil || len(msgs) == 0 {
+						return
+					}
+					ts = msgs[len(msgs)-1].ID
+				}
+				_ = src.MarkRead(id, ts)
+			}(id)
+		}
+		wg.Wait()
+		return nil
 	}
 }
 
@@ -98,16 +177,18 @@ func listenEvents(s streamer) tea.Cmd {
 
 // handleEvent applies a live message event: a message in a non-active channel
 // bumps its unread (and mention) so the sidebar dot lights up immediately. The
-// active channel and open thread are kept fresh by polling.
-func (m *Model) handleEvent(ev source.Event) {
+// active channel and open thread are kept fresh by polling. Returns whether the
+// event deserves a notification (mention or DM).
+func (m *Model) handleEvent(ev source.Event) bool {
 	if ev.ConvID == "" || ev.ConvID == m.activeID {
-		return
+		return false
 	}
-	if _, ok := m.ws.Conversation(ev.ConvID); !ok {
-		return
+	conv, ok := m.ws.Conversation(ev.ConvID)
+	if !ok {
+		return false
 	}
 	if ev.Msg.UserID == m.ws.MeID {
-		return // our own message from another client
+		return false // our own message from another client
 	}
 	meta := m.meta[ev.ConvID]
 	meta.Unread++
@@ -115,6 +196,7 @@ func (m *Model) handleEvent(ev source.Event) {
 		meta.Mention = true
 	}
 	m.meta[ev.ConvID] = meta
+	return ev.Msg.MentionsMe || conv.Type == "dm"
 }
 
 // pollInterval is how often the active channel (and open thread) are refreshed.
@@ -137,6 +219,19 @@ type (
 		replies        []data.Reply
 		err            error
 	}
+	// sentMsg / sentReplyMsg reconcile an optimistic send with the backend.
+	sentMsg struct {
+		convID, pendingID, text string
+		msg                     data.Message
+		err                     error
+	}
+	sentReplyMsg struct {
+		convID, rootID, pendingID, text string
+		reply                           data.Reply
+		err                             error
+	}
+	// clearErrMsg removes the error banner if no newer error replaced it.
+	clearErrMsg struct{ seq int }
 )
 
 func pollTick() tea.Cmd {
@@ -184,6 +279,13 @@ func (m *Model) applyHistory(convID string, msgs []data.Message) {
 	for i := range msgs {
 		if r, ok := loaded[msgs[i].ID]; ok {
 			msgs[i].Replies = r
+		}
+	}
+	// Carry over optimistic sends the backend hasn't acked yet — a poll
+	// snapshot taken between send and ack doesn't contain them.
+	for _, o := range old {
+		if strings.HasPrefix(o.ID, pendingPrefix) {
+			msgs = append(msgs, o)
 		}
 	}
 

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -14,14 +15,32 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 
-	"github.com/abrahamkuri/slack-tui/internal/app"
-	"github.com/abrahamkuri/slack-tui/internal/auth"
-	"github.com/abrahamkuri/slack-tui/internal/config"
-	"github.com/abrahamkuri/slack-tui/internal/onboarding"
-	"github.com/abrahamkuri/slack-tui/internal/root"
+	"github.com/kurenn/slack-tui/internal/app"
+	"github.com/kurenn/slack-tui/internal/auth"
+	"github.com/kurenn/slack-tui/internal/config"
+	"github.com/kurenn/slack-tui/internal/onboarding"
+	"github.com/kurenn/slack-tui/internal/root"
 )
 
+// version is stamped by goreleaser (-X main.version=v…); `go install` builds
+// fall back to the module version from build info.
+var version = "dev"
+
+func versionString() string {
+	if version != "dev" {
+		return version
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+	return version
+}
+
 func main() {
+	if len(os.Args) >= 2 && (os.Args[1] == "--version" || os.Args[1] == "-v" || os.Args[1] == "version") {
+		fmt.Println("slack-tui", versionString())
+		return
+	}
 	if len(os.Args) >= 2 && os.Args[1] == "login" {
 		if err := login(); err != nil {
 			fmt.Fprintln(os.Stderr, "login:", err)
@@ -65,7 +84,7 @@ func main() {
 		}
 	}
 
-	p := tea.NewProgram(root.New(), tea.WithAltScreen())
+	p := tea.NewProgram(root.New(), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "slack-tui:", err)
 		os.Exit(1)

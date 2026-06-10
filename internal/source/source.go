@@ -3,7 +3,7 @@
 // behind the same interface. Network-backed methods are invoked from tea.Cmds.
 package source
 
-import "github.com/abrahamkuri/slack-tui/internal/data"
+import "github.com/kurenn/slack-tui/internal/data"
 
 // Source provides workspace data and message operations.
 type Source interface {
@@ -29,6 +29,32 @@ type Source interface {
 	SetPresence(status string) error
 	// SetStatusText sets the custom status message (text + optional :emoji:).
 	SetStatusText(text, emoji string) error
+	// React toggles an emoji reaction (by Slack name, e.g. "thumbsup") on a
+	// message. Returns whether the reaction was added (false = removed).
+	React(convID, msgID, name string) (added bool, err error)
+	// Edit replaces a message's text (own messages only).
+	Edit(convID, msgID, text string) error
+	// Delete removes a message (own messages only).
+	Delete(convID, msgID string) error
+	// Search runs a workspace-wide message search.
+	Search(query string) ([]SearchHit, error)
+	// Joinable lists public channels the user is not a member of.
+	Joinable() ([]Conversation, error)
+	// Join joins a channel and returns it; the caller adds it to the sidebar.
+	Join(convID string) (Conversation, error)
+}
+
+// Conversation aliases the domain type for the interface signatures above.
+type Conversation = data.Conversation
+
+// SearchHit is one workspace search result.
+type SearchHit struct {
+	ConvID   string
+	ConvName string
+	UserName string
+	Time     string
+	MsgID    string
+	Text     string
 }
 
 // tokenColors is the stable palette of syntax-token color keys assigned to users

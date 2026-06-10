@@ -6,9 +6,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/abrahamkuri/slack-tui/internal/config"
-	"github.com/abrahamkuri/slack-tui/internal/theme"
-	"github.com/abrahamkuri/slack-tui/internal/ui/components"
+	"github.com/kurenn/slack-tui/internal/config"
+	"github.com/kurenn/slack-tui/internal/source"
+	"github.com/kurenn/slack-tui/internal/theme"
+	"github.com/kurenn/slack-tui/internal/ui/components"
 )
 
 // Settings overlay — change appearance/presence live (`,` to open). Changes
@@ -20,7 +21,7 @@ var (
 	statusChoices  = []string{"online", "away", "dnd"}
 )
 
-const settingsRows = 5
+const settingsRows = 6
 
 func (m *Model) openSettings()  { m.settingsOpen, m.settingsSel = true, 0 }
 func (m *Model) closeSettings() { m.settingsOpen = false; _ = config.Save(m.prefs) }
@@ -45,24 +46,14 @@ func (m Model) settingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "k", "up":
 		m.settingsSel = clamp(m.settingsSel-1, 0, settingsRows-1)
 	case "l", "right", " ":
-		m.cycleSetting(1)
-		return m, m.statusChangedCmd()
+		return m, m.cycleSetting(1)
 	case "h", "left":
-		m.cycleSetting(-1)
-		return m, m.statusChangedCmd()
+		return m, m.cycleSetting(-1)
 	}
 	return m, nil
 }
 
-// statusChangedCmd pushes presence to the backend when the status row was cycled.
-func (m Model) statusChangedCmd() tea.Cmd {
-	if m.settingsSel == 3 {
-		return m.setPresenceCmd()
-	}
-	return nil
-}
-
-func (m *Model) cycleSetting(dir int) {
+func (m *Model) cycleSetting(dir int) tea.Cmd {
 	switch m.settingsSel {
 	case 0:
 		m.prefs.Theme = theme.Cycle[wrap(indexOf(theme.Cycle, m.prefs.Theme)+dir, len(theme.Cycle))]
@@ -76,9 +67,17 @@ func (m *Model) cycleSetting(dir int) {
 	case 3:
 		m.myStatus = statusChoices[wrap(indexOfStr(statusChoices, m.myStatus)+dir, len(statusChoices))]
 		m.prefs.Status = m.myStatus
-	case 4:
+		return m.setPresenceCmd()
+	case 4: // group DMs: reload the conversation list with mpims toggled
+		m.prefs.GroupDMs = !m.prefs.GroupDMs
+		if sl, ok := m.src.(*source.Slack); ok {
+			sl.SetGroupDMs(m.prefs.GroupDMs)
+			return m.reloadCmd()
+		}
+	case 5:
 		m.showHints = !m.showHints
 	}
+	return nil
 }
 
 // overlaySettings composites the settings card over the frame.
@@ -96,6 +95,7 @@ func (m Model) overlaySettings(frame string) string {
 		{"Accent", titleCase(m.prefs.Accent), accentChip(p, m.prefs.Accent)},
 		{"Density", m.density.String(), ""},
 		{"Status", statusName(m.myStatus), components.PresenceDot(p, m.myStatus)},
+		{"Group DMs", onOff(m.prefs.GroupDMs), ""},
 		{"Key hints", onOff(m.showHints), ""},
 	}
 

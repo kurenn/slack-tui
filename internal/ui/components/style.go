@@ -5,7 +5,7 @@
 package components
 
 import (
-	"github.com/abrahamkuri/slack-tui/internal/theme"
+	"github.com/kurenn/slack-tui/internal/theme"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"strings"

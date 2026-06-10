@@ -38,6 +38,7 @@ oauth_config:
     user:
       - channels:history
       - channels:read
+      - channels:join        # browse & join channels (palette)
       - groups:history
       - groups:read
       - im:history
@@ -47,9 +48,11 @@ oauth_config:
       - users:read
       - chat:write
       - reactions:read
+      - reactions:write       # add/remove reactions (`a`)
       - users:write           # set presence (active/away)
       - dnd:write             # Do Not Disturb (snooze)
       - users.profile:write   # custom status message
+      - search:read           # workspace message search (`s`)
     bot:
       - channels:history
       - channels:read

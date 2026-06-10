@@ -1,0 +1,58 @@
+version: 2
+project_name: slack-tui
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: .
+    binary: slack-tui
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+      - slack-app-manifest.yaml
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: git
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Other
+      order: 999
+
+release:
+  draft: false
+  prerelease: auto
+
+# To distribute via Homebrew, create a `homebrew-tap` repo and uncomment:
+# brews:
+#   - repository:
+#       owner: kurenn
+#       name: homebrew-tap
+#     homepage: https://github.com/kurenn/slack-tui
+#     description: A keyboard-first terminal Slack client
+#     license: MIT

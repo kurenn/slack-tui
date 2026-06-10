@@ -18,6 +18,7 @@ type Prefs struct {
 	Font      string `json:"font"`
 	Density   string `json:"density"`
 	Status    string `json:"status"`
+	GroupDMs  bool   `json:"group_dms"` // include group DMs (mpims) in the sidebar
 	Onboarded bool   `json:"onboarded"`
 	TS        int64  `json:"ts"`
 }
@@ -99,6 +100,7 @@ func merge(dst *Prefs, src Prefs) {
 	if src.Status != "" {
 		dst.Status = src.Status
 	}
+	dst.GroupDMs = src.GroupDMs
 	dst.Onboarded = src.Onboarded
 	dst.TS = src.TS
 }

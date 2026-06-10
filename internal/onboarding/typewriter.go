@@ -5,7 +5,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/abrahamkuri/slack-tui/internal/theme"
+	"github.com/kurenn/slack-tui/internal/theme"
 )
 
 // tline is one typewriter line. When fill is set, it renders as

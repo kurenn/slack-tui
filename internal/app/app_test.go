@@ -8,14 +8,19 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/abrahamkuri/slack-tui/internal/data"
-	"github.com/abrahamkuri/slack-tui/internal/source"
+	"github.com/kurenn/slack-tui/internal/config"
+	"github.com/kurenn/slack-tui/internal/data"
+	"github.com/kurenn/slack-tui/internal/source"
 )
+
+// newTest builds the model on the in-memory mock — tests must never read the
+// user's tokens/prefs or touch the network.
+func newTest() Model { return NewWith(source.NewMock(), config.Defaults()) }
 
 // TestTallMessageScroll: a message taller than the viewport can be read by
 // line-scrolling (Ctrl-d), not just showing its top.
 func TestTallMessageScroll(t *testing.T) {
-	m := WithSize(New(), 70, 16)
+	m := WithSize(newTest(), 70, 16)
 	var sb strings.Builder
 	for i := 0; i < 40; i++ {
 		sb.WriteString(fmt.Sprintf("line%02d\n", i))
@@ -38,7 +43,7 @@ func TestTallMessageScroll(t *testing.T) {
 // TestTallMessageJK: pressing j repeatedly scrolls down through a tall message
 // (not just jump between messages).
 func TestTallMessageJK(t *testing.T) {
-	m := WithSize(New(), 70, 16)
+	m := WithSize(newTest(), 70, 16)
 	var sb strings.Builder
 	for i := 0; i < 40; i++ {
 		sb.WriteString(fmt.Sprintf("line%02d\n", i))
@@ -189,10 +194,10 @@ func TestPollFollowsBottom(t *testing.T) {
 	}
 }
 
-func newSized() Model { return WithSize(New(), 100, 30) }
+func newSized() Model { return WithSize(newTest(), 100, 30) }
 
 func TestInitialState(t *testing.T) {
-	m := New()
+	m := newTest()
 	if m.focus != focusMessages {
 		t.Errorf("focus = %q, want messages", m.focus)
 	}
@@ -306,6 +311,307 @@ func TestSidebarOpenClearsUnread(t *testing.T) {
 	}
 	if m.focus != focusMessages {
 		t.Errorf("after open focus = %q, want messages", m.focus)
+	}
+}
+
+// TestSendErrorRollsBack: a failed send removes the optimistic message,
+// restores the draft, and surfaces the error banner.
+func TestSendErrorRollsBack(t *testing.T) {
+	m := newSized()
+	m = Key(m, "i")
+	for _, r := range "hello" {
+		m = Key(m, string(r))
+	}
+	m = Key(m, "enter")
+	pendingID := m.curMsgs()[len(m.curMsgs())-1].ID
+	before := len(m.curMsgs())
+	next, _ := m.Update(sentMsg{convID: m.activeID, pendingID: pendingID, text: "hello", err: fmt.Errorf("boom")})
+	m = next.(Model)
+	if len(m.curMsgs()) != before-1 {
+		t.Errorf("failed send should remove the pending message")
+	}
+	if m.draft.Value() != "hello" {
+		t.Errorf("failed send should restore the draft, got %q", m.draft.Value())
+	}
+	if m.loadErr == nil {
+		t.Error("failed send should surface the error banner")
+	}
+}
+
+// TestPerConversationDrafts: switching channels parks the draft and restores
+// the target's.
+func TestPerConversationDrafts(t *testing.T) {
+	m := newSized()
+	first := m.activeID
+	m = Key(m, "i")
+	for _, r := range "wip" {
+		m = Key(m, string(r))
+	}
+	m = Key(m, "esc")
+	m.openChannel("random")
+	if m.draft.Value() != "" {
+		t.Errorf("new channel should start with an empty draft, got %q", m.draft.Value())
+	}
+	m.openChannel(first)
+	if m.draft.Value() != "wip" {
+		t.Errorf("returning should restore the draft, got %q", m.draft.Value())
+	}
+}
+
+// TestReactApply: a confirmed reaction toggles the pill on the message.
+func TestReactApply(t *testing.T) {
+	m := newSized()
+	msgID := m.curMsgs()[0].ID
+	next, _ := m.Update(reactMsg{convID: m.activeID, msgID: msgID, name: "thumbsup", added: true})
+	m = next.(Model)
+	found := false
+	for _, r := range m.curMsgs()[0].Reactions {
+		if r.Emoji == "👍" && r.Count == 1 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("added reaction should appear, got %+v", m.curMsgs()[0].Reactions)
+	}
+	next, _ = m.Update(reactMsg{convID: m.activeID, msgID: msgID, name: "thumbsup", added: false})
+	m = next.(Model)
+	for _, r := range m.curMsgs()[0].Reactions {
+		if r.Emoji == "👍" {
+			t.Fatalf("removed reaction should disappear, got %+v", m.curMsgs()[0].Reactions)
+		}
+	}
+}
+
+// TestEditFlow: e on your own message pre-fills the composer; enter saves.
+func TestEditFlow(t *testing.T) {
+	m := newSized()
+	m.messages[m.activeID] = append(m.messages[m.activeID],
+		data.Message{ID: "mine", UserID: "me", Time: "10:00", Text: "old"})
+	m.msgSel = len(m.curMsgs()) - 1
+	m = Key(m, "e")
+	if !m.insert || m.editingID != "mine" || m.draft.Value() != "old" {
+		t.Fatalf("e should start editing (insert=%v editing=%q draft=%q)", m.insert, m.editingID, m.draft.Value())
+	}
+	m = Key(m, "!")
+	m = Key(m, "enter")
+	if m.editingID != "" || m.insert {
+		t.Error("saving should leave edit + insert mode")
+	}
+	if got := m.curMsgs()[len(m.curMsgs())-1].Text; got != "old!" {
+		t.Errorf("edited text = %q, want old!", got)
+	}
+}
+
+// TestDeleteConfirm: dd opens the confirm; y removes the message.
+func TestDeleteConfirm(t *testing.T) {
+	m := newSized()
+	m.messages[m.activeID] = append(m.messages[m.activeID],
+		data.Message{ID: "mine", UserID: "me", Time: "10:00", Text: "oops"})
+	m.msgSel = len(m.curMsgs()) - 1
+	before := len(m.curMsgs())
+	m = Key(m, "d")
+	m = Key(m, "d")
+	if !m.confirm.open {
+		t.Fatal("dd on your own message should open the confirm")
+	}
+	m = Key(m, "y")
+	if len(m.curMsgs()) != before-1 {
+		t.Errorf("y should delete the message (len=%d)", len(m.curMsgs()))
+	}
+}
+
+// TestLocalFind: / jumps to a matching message; n repeats.
+func TestLocalFind(t *testing.T) {
+	m := newSized()
+	m = Key(m, "/")
+	if !m.findOpen {
+		t.Fatal("/ should open the find prompt")
+	}
+	for _, r := range "dirty" {
+		m = Key(m, string(r))
+	}
+	m = Key(m, "enter")
+	if m.findOpen {
+		t.Fatal("enter should close the find prompt")
+	}
+	if got := m.curMsgs()[m.msgSel].Text; !strings.Contains(strings.ToLower(got), "dirty") {
+		t.Errorf("cursor should land on a matching message, got %q", got)
+	}
+}
+
+// TestSearchPickerFlow: s → query → results → enter jumps to the hit.
+func TestSearchPickerFlow(t *testing.T) {
+	m := newSized()
+	m = Key(m, "s")
+	if !m.picker.open {
+		t.Fatal("s should open the search picker")
+	}
+	for _, r := range "standup" {
+		m = Key(m, string(r))
+	}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("enter on a fresh query should run the search")
+	}
+	res, ok := cmd().(searchMsg)
+	if !ok || len(res.hits) == 0 {
+		t.Fatalf("mock search should hit 'standup', got %+v", res)
+	}
+	next, _ = m.Update(res)
+	m = next.(Model)
+	if len(m.picker.items) == 0 {
+		t.Fatal("results should fill the picker")
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if m.picker.open {
+		t.Error("picking a result should close the picker")
+	}
+	if got := m.curMsgs()[m.msgSel].Text; !strings.Contains(strings.ToLower(got), "standup") {
+		t.Errorf("cursor should land on the search hit, got %q", got)
+	}
+}
+
+// TestNewMarkOnOpen: opening a conversation with unread places the ── new ──
+// mark and lands the cursor on the first unread message.
+func TestNewMarkOnOpen(t *testing.T) {
+	m := newSized() // mock: design has 1 unread
+	m.openChannel("design")
+	msgs := m.curMsgs()
+	if len(msgs) == 0 {
+		t.Fatal("design should have messages")
+	}
+	wantIdx := len(msgs) - 1
+	if m.newMark["design"] != msgs[wantIdx].ID {
+		t.Errorf("newMark = %q, want %q", m.newMark["design"], msgs[wantIdx].ID)
+	}
+	if m.msgSel != wantIdx {
+		t.Errorf("cursor should land on the first unread (sel=%d, want %d)", m.msgSel, wantIdx)
+	}
+}
+
+// TestMentionAutocomplete: typing @ad pops handle suggestions; tab completes.
+func TestMentionAutocomplete(t *testing.T) {
+	m := newSized()
+	m = Key(m, "i")
+	for _, r := range "hey @ad" {
+		m = Key(m, string(r))
+	}
+	if !m.suggestActive() {
+		t.Fatal("@ad should pop mention suggestions")
+	}
+	if got := m.suggest.items[0].label; got != "ada" {
+		t.Fatalf("first suggestion = %q, want ada", got)
+	}
+	m = Key(m, "tab")
+	if got := m.draft.Value(); got != "hey @ada " {
+		t.Errorf("tab should complete the handle, draft = %q", got)
+	}
+	if m.suggestActive() {
+		t.Error("accepting should dismiss the popup")
+	}
+}
+
+// TestEmojiAutocomplete: :fir → tab inserts the glyph.
+func TestEmojiAutocomplete(t *testing.T) {
+	m := newSized()
+	m = Key(m, "i")
+	for _, r := range "ship it :fir" {
+		m = Key(m, string(r))
+	}
+	if !m.suggestActive() {
+		t.Fatal(":fir should pop emoji suggestions")
+	}
+	m = Key(m, "tab")
+	if got := m.draft.Value(); got != "ship it 🔥 " {
+		t.Errorf("tab should insert the glyph, draft = %q", got)
+	}
+}
+
+// TestSuggestEnterDoesNotSend: enter accepts the completion instead of sending.
+func TestSuggestEnterDoesNotSend(t *testing.T) {
+	m := newSized()
+	before := len(m.curMsgs())
+	m = Key(m, "i")
+	for _, r := range "@ad" {
+		m = Key(m, string(r))
+	}
+	m = Key(m, "enter")
+	if len(m.curMsgs()) != before {
+		t.Error("enter with the popup open must not send")
+	}
+	if got := m.draft.Value(); got != "@ada " {
+		t.Errorf("enter should complete, draft = %q", got)
+	}
+	if !m.insert {
+		t.Error("should stay in INSERT mode")
+	}
+}
+
+// TestSuggestEscStaysInInsert: esc dismisses the popup, not INSERT mode.
+func TestSuggestEscStaysInInsert(t *testing.T) {
+	m := newSized()
+	m = Key(m, "i")
+	for _, r := range "@ad" {
+		m = Key(m, string(r))
+	}
+	m = Key(m, "esc")
+	if m.suggestActive() {
+		t.Error("esc should dismiss the popup")
+	}
+	if !m.insert {
+		t.Error("esc with the popup open should stay in INSERT")
+	}
+	m = Key(m, "esc")
+	if m.insert {
+		t.Error("a second esc should leave INSERT")
+	}
+}
+
+// TestJoinFlow: the join picker lists joinable channels; picking one adds it
+// to the sidebar and opens it.
+func TestJoinFlow(t *testing.T) {
+	m := newSized()
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = next.(Model)
+	m = Key(m, "join")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // run "Browse & join channels"
+	m = next.(Model)
+	if cmd == nil || !m.picker.open || m.picker.kind != "join" {
+		t.Fatal("the palette command should open the join picker")
+	}
+	res, ok := cmd().(joinableMsg) // joinableCmd runs synchronously on the mock
+	if !ok {
+		// openJoinPicker batches focus + fetch; find the joinableMsg
+		batch, _ := cmd().(tea.BatchMsg)
+		for _, c := range batch {
+			if r, isJ := c().(joinableMsg); isJ {
+				res, ok = r, true
+			}
+		}
+	}
+	if !ok || len(res.convs) == 0 {
+		t.Fatal("mock should list joinable channels")
+	}
+	next, _ = m.Update(res)
+	m = next.(Model)
+	if len(m.picker.items) != len(res.convs) {
+		t.Fatalf("picker should list %d channels", len(res.convs))
+	}
+	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // join the first
+	m = next.(Model)
+	joined, ok := cmd().(joinedMsg)
+	if !ok || joined.err != nil {
+		t.Fatalf("picking should join, got %T %+v", joined, joined.err)
+	}
+	next, _ = m.Update(joined)
+	m = next.(Model)
+	if _, exists := m.ws.Conversation(joined.conv.ID); !exists {
+		t.Error("joined channel should be in the workspace")
+	}
+	if m.activeID != joined.conv.ID {
+		t.Errorf("joined channel should open, active = %q", m.activeID)
 	}
 }
 

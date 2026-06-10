@@ -31,6 +31,18 @@ func TestPaletteFilterAndJump(t *testing.T) {
 	}
 }
 
+// TestPaletteFuzzy: a subsequence query ("rndm") still finds #random, ranked
+// after any substring matches.
+func TestPaletteFuzzy(t *testing.T) {
+	m := newSized()
+	m = Key(m, "ctrl+k")
+	m = Key(m, "rndm")
+	got := m.filteredPalette()
+	if len(got) == 0 || got[0].id != "ch:random" {
+		t.Fatalf("fuzzy 'rndm' should rank ch:random first, got %v", ids(got))
+	}
+}
+
 func TestPaletteToggleHints(t *testing.T) {
 	m := newSized()
 	before := m.showHints

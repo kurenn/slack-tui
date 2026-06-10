@@ -4,30 +4,47 @@
 package app
 
 import (
+	"fmt"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/abrahamkuri/slack-tui/internal/config"
-	"github.com/abrahamkuri/slack-tui/internal/data"
-	"github.com/abrahamkuri/slack-tui/internal/source"
-	"github.com/abrahamkuri/slack-tui/internal/theme"
-	"github.com/abrahamkuri/slack-tui/internal/ui/components"
+	"github.com/kurenn/slack-tui/internal/config"
+	"github.com/kurenn/slack-tui/internal/data"
+	"github.com/kurenn/slack-tui/internal/source"
+	"github.com/kurenn/slack-tui/internal/theme"
+	"github.com/kurenn/slack-tui/internal/ui/components"
 )
 
 const (
 	sidebarWidth = 30
 	threadWidth  = 44
-	composerH    = 3
 
 	focusSidebar  = "sidebar"
 	focusMessages = "messages"
 	focusThread   = "thread"
 )
+
+// composerLines is how many draft lines the composer shows before scrolling.
+const maxComposerLines = 4
+
+// composerHeight is the center composer's total height (borders + draft lines).
+func (m Model) composerHeight() int {
+	return 2 + clamp(strings.Count(m.draft.Value(), "\n")+1, 1, maxComposerLines)
+}
+
+// threadComposerHeight is the thread composer's total height.
+func (m Model) threadComposerHeight() int {
+	return 2 + clamp(strings.Count(m.threadDraft.Value(), "\n")+1, 1, maxComposerLines)
+}
 
 // Model is the application state.
 type Model struct {
@@ -41,6 +58,7 @@ type Model struct {
 
 	messages    map[string][]data.Message
 	fullyLoaded map[string]bool // conversations with no more older history
+	loading     map[string]bool // conversations with an in-flight history fetch
 	meta        map[string]components.Meta
 	myStatus    string
 
@@ -53,8 +71,32 @@ type Model struct {
 	threadRootID string
 	threadSel    int
 
-	draft       textinput.Model
-	threadDraft textinput.Model
+	draft       textarea.Model
+	threadDraft textarea.Model
+	drafts      map[string]string // per-conversation unsent draft text
+
+	pendingSeq int // counter for optimistic (not yet acked) send IDs
+	errSeq     int // generation counter for the auto-clearing error banner
+	lastTitleN int // last unread total pushed to the terminal title
+
+	helpOpen bool
+
+	editingID string // message being edited in the composer ("" = composing new)
+	prevDraft string // draft parked while editing
+	dPending  time.Time
+	suggest   suggestState // composer autocomplete popup
+
+	picker      pickerState
+	pickerInput textinput.Model
+	confirm     confirmState
+
+	findOpen    bool
+	findInput   textinput.Model
+	searchQuery string // last local-find query (n/N repeat)
+
+	newMark       map[string]string // convID → first-unread message ID (the ── new ── rule)
+	pendingUnread map[string]int    // unread count snapshot for channels opening async
+	pendingSelect map[string]string // convID → message ID to select once history lands
 
 	paletteOpen  bool
 	paletteQuery textinput.Model
@@ -70,9 +112,10 @@ type Model struct {
 	gPending      time.Time
 }
 
-// New builds the initial model from saved (or default) prefs. The data source is
-// real Slack when SLACK_USER_TOKEN is set, otherwise the local mock. The active
-// channel's history is loaded synchronously; other channels load on open.
+// New builds the production model from saved (or default) prefs. The data
+// source is real Slack when a user token is configured (env or tokens.json),
+// otherwise the local mock. Call it off the UI thread — Load talks to the
+// network (root runs it inside a tea.Cmd behind a connecting screen).
 func New() Model {
 	prefs, _ := config.Load()
 
@@ -82,21 +125,31 @@ func New() Model {
 
 	var src source.Source
 	if tok.User != "" {
-		src = source.NewSlack(tok.User)
+		sl := source.NewSlack(tok.User)
+		sl.SetGroupDMs(prefs.GroupDMs)
+		src = sl
 	} else {
 		src = source.NewMock()
 	}
+	m := NewWith(src, prefs)
+
+	// Real-time: start Socket Mode if the app + bot tokens are present (m.src
+	// may have fallen back to the mock if Load failed).
+	if sl, ok := m.src.(*source.Slack); ok && tok.App != "" && tok.Bot != "" {
+		sl.StartSocket(tok.App, tok.Bot)
+	}
+	return m
+}
+
+// NewWith builds the model on an explicit source and prefs. Tests inject the
+// mock here so they never touch the network or the user's config files.
+func NewWith(src source.Source, prefs config.Prefs) Model {
 	ws, err := src.Load()
 	var loadErr error
 	if err != nil { // fall back to the mock so the app still runs; surface the error
 		loadErr = err
 		src = source.NewMock()
 		ws, _ = src.Load()
-	}
-
-	// Real-time: start Socket Mode if the app + bot tokens are present.
-	if sl, ok := src.(*source.Slack); ok && tok.App != "" && tok.Bot != "" {
-		sl.StartSocket(tok.App, tok.Bot)
 	}
 
 	// Onboarding hand-off: adopt the chosen handle as the current user's identity.
@@ -116,8 +169,22 @@ func New() Model {
 		ti.Prompt = ""
 		return ti
 	}
+	mkArea := func() textarea.Model {
+		ta := textarea.New()
+		ta.Prompt = ""
+		ta.ShowLineNumbers = false
+		ta.CharLimit = 0
+		ta.SetHeight(1)
+		// Enter sends (handled by insertKey); newlines come from alt+enter/ctrl+j.
+		ta.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("alt+enter", "ctrl+j"))
+		// The composer draws its own chrome — flatten the textarea's.
+		ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
+		ta.FocusedStyle.Base = lipgloss.NewStyle()
+		ta.BlurredStyle.Base = lipgloss.NewStyle()
+		return ta
+	}
 
-	activeID := "engineering"
+	activeID := "engineering" // the mock's demo channel
 	if _, ok := ws.Conversation(activeID); !ok { // real Slack: pick the first channel/DM
 		switch {
 		case len(ws.Channels) > 0:
@@ -137,14 +204,21 @@ func New() Model {
 		loadErr:         loadErr,
 		messages:        map[string][]data.Message{},
 		fullyLoaded:     map[string]bool{},
+		loading:         map[string]bool{},
 		meta:            meta,
 		myStatus:        prefs.Status,
 		activeID:        activeID,
 		focus:           focusMessages,
-		draft:           mkInput(),
-		threadDraft:     mkInput(),
+		draft:           mkArea(),
+		threadDraft:     mkArea(),
+		drafts:          map[string]string{},
 		paletteQuery:    mkInput(),
 		statusTextInput: mkInput(),
+		pickerInput:     mkInput(),
+		findInput:       mkInput(),
+		newMark:         map[string]string{},
+		pendingUnread:   map[string]int{},
+		pendingSelect:   map[string]string{},
 	}
 	m.ensureHistory(activeID)
 	m.sideSel = m.flatIndexOf(activeID)
@@ -157,6 +231,8 @@ func (m Model) Init() tea.Cmd {
 	if sl, ok := m.src.(*source.Slack); ok {
 		if sl.Events() != nil {
 			cmds = append(cmds, listenEvents(sl)) // live channel events
+		} else {
+			cmds = append(cmds, chanPollTick()) // no Socket Mode: poll channel unread instead
 		}
 		cmds = append(cmds, dmPollTick()) // periodic DM unread (Socket Mode can't see DMs)
 	}
@@ -224,15 +300,64 @@ func (m *Model) ensureHistory(id string) {
 }
 
 func (m *Model) openChannel(id string) tea.Cmd {
+	if id != m.activeID { // park the unsent draft; restore the target's
+		m.drafts[m.activeID] = m.draft.Value()
+		m.draft.SetValue(m.drafts[id])
+	}
+	unread := m.meta[id].Unread // captured before clearing — drives the ── new ── rule
 	m.activeID = id
-	m.ensureHistory(id)
-	m.msgSel = max(0, len(m.messages[id])-1)
 	m.msgExtra = 0
 	m.meta[id] = components.Meta{Unread: 0, Mention: false}
 	m.focus = focusMessages
 	m.sideSel = m.flatIndexOf(id)
 	m.threadRootID = ""
-	return m.markReadCmd(id) // persist read state to the backend
+	delete(m.newMark, id)
+	if _, ok := m.messages[id]; !ok {
+		if _, instant := m.src.(*source.Mock); instant {
+			m.ensureHistory(id) // the mock answers in-memory — keep it synchronous
+		} else { // real Slack: fetch off the UI thread, show "loading…" meanwhile
+			m.loading[id] = true
+			if unread > 0 {
+				m.pendingUnread[id] = unread // mark + cursor computed when history lands
+			}
+			m.msgSel = 0
+			return tea.Batch(m.historyCmd(id), m.titleCmd())
+		}
+	}
+	m.msgSel = max(0, len(m.messages[id])-1)
+	m.applyNewMark(id, unread)
+	m.applyPendingSelect(id)
+	return tea.Batch(m.markReadCmd(id), m.titleCmd()) // persist read state to the backend
+}
+
+// applyNewMark places the ── new ── rule before the first unread message and
+// lands the cursor there (unread counts messages after last_read, so the first
+// unread is len-unread).
+func (m *Model) applyNewMark(id string, unread int) {
+	msgs := m.messages[id]
+	if unread <= 0 || len(msgs) == 0 {
+		return
+	}
+	idx := max(0, len(msgs)-unread)
+	m.newMark[id] = msgs[idx].ID
+	if id == m.activeID {
+		m.msgSel, m.msgExtra = idx, 0
+	}
+}
+
+// applyPendingSelect moves the cursor to a requested message (search jump).
+func (m *Model) applyPendingSelect(id string) {
+	want, ok := m.pendingSelect[id]
+	if !ok {
+		return
+	}
+	delete(m.pendingSelect, id)
+	for i, msg := range m.messages[id] {
+		if msg.ID == want && id == m.activeID {
+			m.msgSel, m.msgExtra = i, 0
+			return
+		}
+	}
 }
 
 // pageJump is the selection step for half-page scrolling (Ctrl-d/Ctrl-u).
@@ -250,9 +375,9 @@ func (m Model) msgGeom() (ss, se, total, innerH int) {
 	if m.threadOpen() {
 		centerW = m.width - sidebarWidth - threadWidth - 2
 	}
-	innerH = (m.height - 2 - composerH) - 2
+	innerH = (m.height - 2 - m.composerHeight()) - 2
 	msgs := m.curMsgs()
-	lines, starts := components.MessagesBody(m.pal, m.ws, msgs, m.msgSel, m.focus == focusMessages, m.density, centerW-2)
+	lines, starts := components.MessagesBody(m.pal, m.ws, msgs, m.msgSel, m.focus == focusMessages, m.density, centerW-2, m.newMark[m.activeID])
 	total = len(lines)
 	if n := len(msgs); n > 0 {
 		mi := clamp(m.msgSel, 0, n-1)
@@ -370,45 +495,68 @@ func (m *Model) enterInsert(which string) tea.Cmd {
 
 func (m *Model) leaveInsert() {
 	m.insert = false
+	m.clearSuggest()
 	m.draft.Blur()
 	m.threadDraft.Blur()
 }
 
-func (m *Model) sendMessage() {
+// pendingPrefix marks optimistic local messages awaiting the backend's ack.
+const pendingPrefix = "pending-"
+
+func nowClock() string { return time.Now().Format("15:04") }
+
+// sendMessage appends the draft optimistically and posts it off the UI thread;
+// sentMsg reconciles (real ID on success, removal + draft restore on error).
+func (m *Model) sendMessage() tea.Cmd {
 	text := strings.TrimSpace(m.draft.Value())
 	if text == "" {
-		return
+		return nil
 	}
-	msg, err := m.src.Send(m.activeID, text)
-	if err != nil {
-		m.loadErr = err
-		return
-	}
-	m.messages[m.activeID] = append(m.messages[m.activeID], msg)
+	m.pendingSeq++
+	pid := fmt.Sprintf("%s%d", pendingPrefix, m.pendingSeq)
+	m.messages[m.activeID] = append(m.messages[m.activeID],
+		data.Message{ID: pid, UserID: m.ws.MeID, Time: nowClock(), Text: text})
 	m.draft.SetValue("")
+	m.clearSuggest()
 	m.msgSel = len(m.messages[m.activeID]) - 1
 	m.msgExtra = 0
+	src, conv := m.src, m.activeID
+	return func() tea.Msg {
+		msg, err := src.Send(conv, text)
+		return sentMsg{convID: conv, pendingID: pid, text: text, msg: msg, err: err}
+	}
 }
 
-func (m *Model) sendReply() {
+// sendReply mirrors sendMessage for thread replies.
+func (m *Model) sendReply() tea.Cmd {
 	text := strings.TrimSpace(m.threadDraft.Value())
 	if text == "" || m.threadRootID == "" {
-		return
+		return nil
 	}
-	r, err := m.src.SendReply(m.activeID, m.threadRootID, text)
-	if err != nil {
-		m.loadErr = err
-		return
+	m.pendingSeq++
+	pid := fmt.Sprintf("%s%d", pendingPrefix, m.pendingSeq)
+	m.eachRootMsg(m.threadRootID, func(msg *data.Message) {
+		msg.Replies = append(msg.Replies, data.Reply{ID: pid, UserID: m.ws.MeID, Time: nowClock(), Text: text})
+	})
+	m.threadDraft.SetValue("")
+	m.clearSuggest()
+	src, conv, root := m.src, m.activeID, m.threadRootID
+	return func() tea.Msg {
+		r, err := src.SendReply(conv, root, text)
+		return sentReplyMsg{convID: conv, rootID: root, pendingID: pid, text: text, reply: r, err: err}
 	}
+}
+
+// eachRootMsg runs fn on every cached copy of the message with the given ID.
+func (m *Model) eachRootMsg(id string, fn func(*data.Message)) {
 	for k, list := range m.messages {
 		for i := range list {
-			if list[i].ID == m.threadRootID {
-				list[i].Replies = append(list[i].Replies, r)
+			if list[i].ID == id {
+				fn(&list[i])
 			}
 		}
 		m.messages[k] = list
 	}
-	m.threadDraft.SetValue("")
 }
 
 // ── update ──────────────────────────────────────────────────────────────────
@@ -421,41 +569,90 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pollMsg:
 		return m, tea.Batch(pollTick(), m.refresh(), m.markReadCmd(m.activeID))
 	case dmPollMsg:
-		return m, tea.Batch(dmPollTick(), m.dmUnreadCmd())
+		return m, tea.Batch(dmPollTick(), m.unreadCmd(m.dmIDs()))
+	case chanPollMsg:
+		return m, tea.Batch(chanPollTick(), m.unreadCmd(m.chanIDs()))
 	case unreadMsg:
-		for _, d := range m.ws.DMs {
-			if d.ID == m.activeID {
+		for id, n := range msg.counts { // only ids actually fetched this round
+			if id == m.activeID {
 				continue
 			}
-			mm := m.meta[d.ID]
-			mm.Unread = msg.counts[d.ID]
-			m.meta[d.ID] = mm
+			mm := m.meta[id]
+			mm.Unread = n
+			if n == 0 {
+				mm.Mention = false
+			}
+			m.meta[id] = mm
 		}
-		return m, nil
+		return m, m.titleCmd()
 	case presenceMsg:
-		if msg.err != nil {
-			m.loadErr = msg.err
-		}
-		return m, nil
+		return m, m.flash(msg.err)
 	case historyMsg:
-		if msg.err == nil {
-			m.applyHistory(msg.convID, msg.msgs)
+		delete(m.loading, msg.convID)
+		if msg.err != nil {
+			return m, m.flash(msg.err)
+		}
+		m.applyHistory(msg.convID, msg.msgs)
+		if n, ok := m.pendingUnread[msg.convID]; ok { // async channel open: place the ── new ── rule
+			delete(m.pendingUnread, msg.convID)
+			m.applyNewMark(msg.convID, n)
+		}
+		m.applyPendingSelect(msg.convID)
+		if msg.convID == m.activeID {
+			return m, m.markReadCmd(msg.convID)
 		}
 		return m, nil
+	case reactMsg:
+		return m, m.applyReact(msg)
+	case editMsg:
+		return m, m.flash(msg.err)
+	case deleteMsg:
+		return m, m.flash(msg.err)
+	case searchMsg:
+		return m, m.applySearch(msg)
+	case joinableMsg:
+		return m, m.applyJoinable(msg)
+	case joinedMsg:
+		return m, m.applyJoined(msg)
+	case wsMsg:
+		return m, m.applyWorkspace(msg)
 	case repliesMsg:
-		if msg.err == nil {
-			m.applyReplies(msg.convID, msg.rootID, msg.replies)
+		if msg.err != nil {
+			return m, m.flash(msg.err)
 		}
+		m.applyReplies(msg.convID, msg.rootID, msg.replies)
 		return m, nil
 	case olderMsg:
-		if msg.err == nil {
-			m.prependHistory(msg.convID, msg.msgs)
+		if msg.err != nil {
+			return m, m.flash(msg.err)
+		}
+		m.prependHistory(msg.convID, msg.msgs)
+		return m, nil
+	case sentMsg:
+		return m, m.applySent(msg)
+	case sentReplyMsg:
+		return m, m.applySentReply(msg)
+	case clearErrMsg:
+		if msg.seq == m.errSeq {
+			m.loadErr = nil
 		}
 		return m, nil
 	case eventMsg:
-		m.handleEvent(msg.ev)
+		notify := m.handleEvent(msg.ev)
+		cmds := []tea.Cmd{m.titleCmd()}
+		if notify {
+			cmds = append(cmds, bellCmd)
+		}
 		if s, ok := m.src.(streamer); ok {
-			return m, listenEvents(s) // keep listening
+			cmds = append(cmds, listenEvents(s)) // keep listening
+		}
+		return m, tea.Batch(cmds...)
+	case tea.MouseMsg:
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			m.scrollMessages(-msgScrollStep)
+		case tea.MouseButtonWheelDown:
+			m.scrollMessages(msgScrollStep)
 		}
 		return m, nil
 	case tea.KeyMsg:
@@ -465,7 +662,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.closePalette()
 				return m, nil
 			}
+			m.closePicker() // the palette supersedes any open picker
 			return m, m.openPalette()
+		}
+		if m.helpOpen {
+			return m.helpKey(msg)
+		}
+		if m.confirm.open {
+			return m.confirmKey(msg)
+		}
+		if m.picker.open {
+			return m.pickerKey(msg)
+		}
+		if m.findOpen {
+			return m.findKey(msg)
 		}
 		if m.statusTextOpen {
 			return m.statusTextKey(msg)
@@ -482,6 +692,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.normalKey(msg)
 	}
 	// forward non-key msgs (cursor blink) to the active input
+	if m.picker.open {
+		var cmd tea.Cmd
+		m.pickerInput, cmd = m.pickerInput.Update(msg)
+		return m, cmd
+	}
+	if m.findOpen {
+		var cmd tea.Cmd
+		m.findInput, cmd = m.findInput.Update(msg)
+		return m, cmd
+	}
 	if m.paletteOpen {
 		var cmd tea.Cmd
 		m.paletteQuery, cmd = m.paletteQuery.Update(msg)
@@ -500,19 +720,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) insertKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.suggestActive() && m.suggestKey(msg.String()) {
+		return m, nil // the popup consumed the key
+	}
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc":
+		if m.editingID != "" {
+			m.cancelEdit()
+		}
 		m.leaveInsert()
 		return m, nil
 	case "enter":
 		if m.focus == focusThread {
-			m.sendReply()
-		} else {
-			m.sendMessage()
+			return m, m.sendReply()
 		}
-		return m, nil
+		if m.editingID != "" {
+			return m, m.applyEditDraft()
+		}
+		return m, m.sendMessage()
 	}
 	var cmd tea.Cmd
 	if m.focus == focusThread {
@@ -520,6 +747,7 @@ func (m Model) insertKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	} else {
 		m.draft, cmd = m.draft.Update(msg)
 	}
+	m.recomputeSuggest()
 	return m, cmd
 }
 
@@ -535,6 +763,9 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.refresh()
 	case ",": // open the settings overlay
 		m.openSettings()
+		return m, nil
+	case "?": // keymap cheat sheet
+		m.helpOpen = true
 		return m, nil
 	case "]": // jump to the next conversation with unread
 		return m, m.jumpUnread(1)
@@ -609,6 +840,56 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case "a": // react to the selected message
+		if msg, ok := m.selectedMsg(); ok && !isPending(msg.ID) {
+			return m, m.openReactionPicker(msg.ID)
+		}
+
+	case "e": // edit your own selected message
+		if msg, ok := m.selectedMsg(); ok && msg.UserID == m.ws.MeID && !isPending(msg.ID) {
+			return m, m.startEdit(msg)
+		}
+
+	case "d": // dd deletes your own selected message (with confirm)
+		if !m.dPending.IsZero() && time.Since(m.dPending) < 500*time.Millisecond {
+			m.dPending = time.Time{}
+			if msg, ok := m.selectedMsg(); ok && msg.UserID == m.ws.MeID && !isPending(msg.ID) {
+				id := msg.ID
+				m.openConfirm("delete this message?", func(mm *Model) tea.Cmd {
+					return mm.deleteMessage(id)
+				})
+			}
+		} else {
+			m.dPending = time.Now()
+		}
+		return m, nil
+
+	case "o": // open the selected message's link(s)
+		if m.focus == focusMessages {
+			return m, m.openMsgLinks()
+		}
+
+	case "/": // find within the loaded channel history
+		return m, m.openFind()
+	case "n":
+		if m.focus == focusMessages && m.searchQuery != "" {
+			return m, m.jumpFind(1)
+		}
+	case "N":
+		if m.focus == focusMessages && m.searchQuery != "" {
+			return m, m.jumpFind(-1)
+		}
+
+	case "s": // workspace-wide message search
+		return m, m.openSearchPicker()
+
+	case "y": // yank the selected message's text to the clipboard
+		if msg, ok := m.selectedMsg(); ok {
+			if err := clipboard.WriteAll(msg.Text); err != nil {
+				return m, m.flash(fmt.Errorf("clipboard: %w", err))
+			}
+		}
+
 	case "i":
 		which := focusMessages
 		if m.focus == focusThread {
@@ -631,14 +912,21 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "esc":
+		if m.loadErr != nil { // dismiss the error banner first
+			m.loadErr = nil
+			return m, nil
+		}
 		if m.threadOpen() {
 			m.closeThread()
 		}
 	}
 
-	// any non-g key cancels a pending gg
+	// any non-g key cancels a pending gg (same for dd)
 	if k != "g" {
 		m.gPending = time.Time{}
+	}
+	if k != "d" {
+		m.dPending = time.Time{}
 	}
 	return m, nil
 }
@@ -686,6 +974,112 @@ func (m *Model) jumpBottom() {
 			m.threadSel = max(0, len(root.Replies)-1)
 		}
 	}
+}
+
+// ── async send reconciliation, error flash, notifications ──────────────────
+
+// flash surfaces an error in the banner and schedules its auto-clear. Returns
+// nil for a nil error, so handlers can `return m, m.flash(msg.err)` directly.
+func (m *Model) flash(err error) tea.Cmd {
+	if err == nil {
+		return nil
+	}
+	m.loadErr = err
+	m.errSeq++
+	seq := m.errSeq
+	return tea.Tick(8*time.Second, func(time.Time) tea.Msg { return clearErrMsg{seq} })
+}
+
+// applySent reconciles an optimistic message with the backend's answer: swap in
+// the real message, or roll back and restore the draft on error.
+func (m *Model) applySent(msg sentMsg) tea.Cmd {
+	list := m.messages[msg.convID]
+	idx := -1
+	for i := range list {
+		if list[i].ID == msg.pendingID {
+			idx = i
+			break
+		}
+	}
+	if msg.err != nil {
+		if idx >= 0 {
+			m.messages[msg.convID] = append(list[:idx], list[idx+1:]...)
+			if msg.convID == m.activeID {
+				m.msgSel = clamp(m.msgSel, 0, max(0, len(m.messages[msg.convID])-1))
+			}
+		}
+		if msg.convID == m.activeID && strings.TrimSpace(m.draft.Value()) == "" {
+			m.draft.SetValue(msg.text) // give the user their words back
+		}
+		return m.flash(msg.err)
+	}
+	if idx >= 0 {
+		already := false // a poll may have delivered the real message first
+		for i := range list {
+			if list[i].ID == msg.msg.ID {
+				already = true
+				break
+			}
+		}
+		if already {
+			m.messages[msg.convID] = append(list[:idx], list[idx+1:]...)
+		} else {
+			list[idx] = msg.msg
+			m.messages[msg.convID] = list
+		}
+	}
+	return nil
+}
+
+// applySentReply is applySent for thread replies.
+func (m *Model) applySentReply(msg sentReplyMsg) tea.Cmd {
+	if msg.err != nil {
+		m.eachRootMsg(msg.rootID, func(root *data.Message) {
+			for i := range root.Replies {
+				if root.Replies[i].ID == msg.pendingID {
+					root.Replies = append(root.Replies[:i], root.Replies[i+1:]...)
+					break
+				}
+			}
+		})
+		if m.threadRootID == msg.rootID && strings.TrimSpace(m.threadDraft.Value()) == "" {
+			m.threadDraft.SetValue(msg.text)
+		}
+		return m.flash(msg.err)
+	}
+	m.eachRootMsg(msg.rootID, func(root *data.Message) {
+		for i := range root.Replies {
+			if root.Replies[i].ID == msg.pendingID {
+				root.Replies[i] = msg.reply
+				return
+			}
+		}
+	})
+	return nil
+}
+
+// titleCmd reflects the total unread count in the terminal title (when changed).
+func (m *Model) titleCmd() tea.Cmd {
+	n := 0
+	for _, mm := range m.meta {
+		n += mm.Unread
+	}
+	if n == m.lastTitleN {
+		return nil
+	}
+	m.lastTitleN = n
+	title := "slack-tui"
+	if n > 0 {
+		title = fmt.Sprintf("slack-tui (%d)", n)
+	}
+	return tea.SetWindowTitle(title)
+}
+
+// bellCmd rings the terminal bell — BEL prints nothing, so it can't disturb the
+// alt screen. Terminals surface it as the usual badge/sound.
+func bellCmd() tea.Msg {
+	_, _ = os.Stdout.WriteString("\a")
+	return nil
 }
 
 // ── small utilities ─────────────────────────────────────────────────────────

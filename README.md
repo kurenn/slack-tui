@@ -1,74 +1,101 @@
+<div align="center">
+
 # slack-tui
 
-A keyboard-first, vim-modal Slack client that runs **inside your terminal**
-(Ghostty et al.) — like `vim` or `lazygit`, not a separate app. Built with
-[Bubble Tea](https://github.com/charmbracelet/bubbletea).
+**A keyboard-first, vim-modal Slack client for your terminal.**
 
-> Status: **working client.** Three-pane shell, vim-modal keyboard engine, command
-> palette, threads, full onboarding, and real Slack (Web API reads/sends, presence,
-> Socket Mode live unread). Falls back to a mock workspace when no token is set.
+Like `vim` or `lazygit` — not another Electron window.
+Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
-## Run
+[![ci](https://github.com/kurenn/slack-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/kurenn/slack-tui/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/kurenn/slack-tui)](https://github.com/kurenn/slack-tui/releases)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+<img src="docs/main.png" width="760" alt="slack-tui main view" />
+
+</div>
+
+## Features
+
+- **Vim-modal** — NORMAL/INSERT modes, `j/k`, `gg/G`, `Ctrl-d/u`, `/` find, `dd` delete
+- **Everything async** — sends are optimistic, channels load in the background, the UI never freezes
+- **Threads, reactions, edits** — open threads, react with any emoji, edit and delete your messages
+- **Autocomplete** — `@` pops handles (mentions actually ping), `:` pops emoji
+- **Fuzzy everything** — command palette (`Ctrl-K`), workspace search (`s`), channel browser & join
+- **Lives in the background** — Socket Mode live unread (self-healing), terminal bell on mentions, unread count in the terminal title, `── new ──` divider at first unread
+- **5 themes × 7 accents**, group DMs, per-conversation drafts, multi-line composer
+- **Mock workspace built in** — run it with zero setup to try the feel
+
+<div align="center">
+<img src="docs/palette.png" width="420" alt="command palette" /> <img src="docs/autocomplete.png" width="420" alt="mention autocomplete" />
+<img src="docs/thread.png" width="760" alt="thread view" />
+</div>
+
+## Install
 
 ```sh
-go run .                 # launch (mock data if no token; real Slack if a token is set)
-go run . --dump 100x30   # render one frame to stdout (headless / screenshots)
+go install github.com/kurenn/slack-tui@latest
 ```
 
-### Connecting to Slack
-
-Create an app from `slack-app-manifest.yaml`, then connect one of two ways:
-
-**Browser sign-in (recommended).** Copy the app's **Client ID / Secret** (Basic
-Information) into env or `~/.config/slack-tui/oauth.json`, then:
+…or grab a binary from the [releases page](https://github.com/kurenn/slack-tui/releases).
 
 ```sh
-SLACK_CLIENT_ID=… SLACK_CLIENT_SECRET=… slack-tui login   # opens the browser, saves tokens
+slack-tui          # no token? you get a mock workspace to play with
 ```
 
-…or pick **"Sign in with Slack"** in onboarding. Tokens are saved to
-`~/.config/slack-tui/tokens.json` (0600).
+## Connect to Slack
 
-**Manual token.** Paste a **user token** (`xoxp-…`) in the onboarding token screen,
-or set env vars (env overrides the saved file, per-token):
+1. Create a Slack app from [`slack-app-manifest.yaml`](slack-app-manifest.yaml)
+   (api.slack.com/apps → *Create New App* → *From an app manifest*).
+2. Sign in with your browser:
 
 ```sh
-SLACK_USER_TOKEN=xoxp-…                          # required for real Slack
-SLACK_APP_TOKEN=xapp-… SLACK_BOT_TOKEN=xoxb-…    # optional: Socket Mode live channel unread
+SLACK_CLIENT_ID=… SLACK_CLIENT_SECRET=… slack-tui login
 ```
 
-The **app-level token** (`xapp-…`) for Socket Mode is never issued by OAuth — set
-it via `SLACK_APP_TOKEN` or the onboarding token form.
+…or pick **"Sign in with Slack"** in onboarding, or paste a user token
+(`xoxp-…`) directly. Tokens are stored in `~/.config/slack-tui/tokens.json`
+(0600). Env vars (`SLACK_USER_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_BOT_TOKEN`)
+override per-token.
 
-Keys: `j/k`/`gg`/`G` move · `Ctrl-d`/`Ctrl-u` scroll · `Tab`/`h`/`l` panes ·
-`t`/`Enter` thread · `i` write · `]`/`[` next/prev unread · `Ctrl-K` palette ·
-`,` settings · `Ctrl-R` refresh · `q` quit.
+For **live** channel unread, also generate an app-level token (`xapp-…`,
+Socket Mode) and invite the bot to the channels you care about — without it,
+unread badges refresh on a slow poll instead.
 
-## Design source
+## Keys
 
-Recreated from the high-fidelity handoff in `design_handoff_slack_tui/`. The
-prototype is a React/HTML "fake terminal"; this is the real thing. Notable
-terminal-vs-web deltas: the app can't change the host terminal's **font** (that's
-Ghostty's config) and `Cmd-K` becomes `Ctrl-K` (terminals never see ⌘).
+| | |
+|---|---|
+| `j/k` `gg/G` `Ctrl-d/u` | move · jump · half-page |
+| `Tab` `h/l` | switch panes |
+| `Enter` / `t` | open thread |
+| `i` · `r` | write · reply in thread |
+| `Alt-Enter` | newline in the composer |
+| `@…` `:…` | autocomplete mentions / emoji (`Tab` accepts) |
+| `a` · `e` · `dd` · `y` | react · edit · delete · yank |
+| `o` | open message links/files |
+| `/` `n/N` · `s` | find in channel · search workspace |
+| `]` `[` | next/prev unread |
+| `Ctrl-K` | command palette (fuzzy) |
+| `,` · `?` | settings · help |
+| `Esc` · `q` | close/dismiss · quit |
 
-## Architecture
+The mouse wheel scrolls. `?` shows the full keymap in-app.
 
+## Development
+
+```sh
+go run .                          # mock workspace, no setup
+go run . --dump 100x30            # render one frame to stdout (headless)
+go run . --dump 100x30 "ctrl+k"   # …after replaying keys
+go test ./...                     # hermetic — never touches the network
 ```
-main.go                 entry; alt-screen; loads prefs → (onboarding | app)
-internal/
-  theme/    5 palettes + 7 accents + density → resolved lipgloss colors
-  data/     domain types + the mock monospace-labs workspace (Datasource shape)
-  markup/   syntax tokenizer: `code` @mention #channel url + ```fences```
-  config/   prefs.json at ~/.config/slack-tui (the onboarding→app handoff seam)
-  ui/pane/  the box-drawing pane primitive (title embedded in the top rule)
-```
 
-## Roadmap
+The architecture in one breath: `internal/source` abstracts the backend (a
+mock and a real Slack client behind one interface — network calls run inside
+`tea.Cmd`s, never on the UI thread), `internal/app` is the Bubble Tea model
+with the modal keyboard engine, and `internal/ui` renders the panes.
 
-1. ✅ Foundations — theme tokens, mock data, config, Pane primitive, static shell
-2. ✅ Modal keyboard engine (NORMAL/INSERT, focus routing)
-3. ✅ Threads + composer send + scroll-into-view
-4. ✅ Command palette (`Ctrl-K`)
-5. ✅ Onboarding (boot → auth → wizard → keyboard trainer → launch)
-6. ✅ Prefs hand-off (onboarding writes `prefs.json`, app adopts theme/accent/density/status/handle)
-7. ⬜ Real Slack data source (Web API reads + Socket Mode/poll for live)
+## License
+
+[MIT](LICENSE)

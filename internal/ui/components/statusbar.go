@@ -3,7 +3,7 @@ package components
 import (
 	"strings"
 
-	"github.com/abrahamkuri/slack-tui/internal/theme"
+	"github.com/kurenn/slack-tui/internal/theme"
 	"github.com/charmbracelet/lipgloss"
 )
 

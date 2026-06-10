@@ -1,13 +1,13 @@
 package source
 
 import (
-	"strings"
+	"time"
 
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
 
-	"github.com/abrahamkuri/slack-tui/internal/data"
+	"github.com/kurenn/slack-tui/internal/data"
 )
 
 // Event is a real-time message delivered over Socket Mode.
@@ -20,6 +20,8 @@ type Event struct {
 // StartSocket opens a Socket Mode connection (app-level token + bot token) and
 // streams incoming message events on Events(). It only receives events for
 // channels/DMs the app is a member of — that's a Slack platform constraint.
+// Run reconnects internally on normal disconnects; if it ever returns (a fatal
+// error), it's restarted with a backoff so live updates don't silently die.
 func (s *Slack) StartSocket(appToken, botToken string) {
 	bot := slack.New(botToken, slack.OptionAppLevelToken(appToken))
 	sm := socketmode.New(bot)
@@ -45,13 +47,18 @@ func (s *Slack) StartSocket(appToken, botToken string) {
 				ConvID:   me.Channel,
 				ThreadTS: me.ThreadTimeStamp,
 				Msg: data.Message{
-					ID: me.TimeStamp, UserID: me.User, Time: tsTime(me.TimeStamp),
-					Text: s.renderText(me.Text), MentionsMe: strings.Contains(me.Text, "<@"+s.meID+">"),
+					ID: me.TimeStamp, UserID: me.User, Time: tsTime(me.TimeStamp), Day: tsDay(me.TimeStamp),
+					Text: s.renderText(me.Text), MentionsMe: s.mentionsMe(me.Text),
 				},
 			}
 		}
 	}()
-	go func() { _ = sm.Run() }()
+	go func() {
+		for {
+			_ = sm.Run()
+			time.Sleep(5 * time.Second)
+		}
+	}()
 }
 
 // Events returns the real-time event stream, or nil if Socket Mode isn't running.

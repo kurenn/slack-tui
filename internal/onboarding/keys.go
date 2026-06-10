@@ -8,8 +8,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/abrahamkuri/slack-tui/internal/auth"
-	"github.com/abrahamkuri/slack-tui/internal/config"
+	"github.com/kurenn/slack-tui/internal/auth"
+	"github.com/kurenn/slack-tui/internal/config"
 )
 
 // ── option data ──────────────────────────────────────────────────────────────

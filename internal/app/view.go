@@ -5,9 +5,9 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/abrahamkuri/slack-tui/internal/data"
-	"github.com/abrahamkuri/slack-tui/internal/ui/components"
-	"github.com/abrahamkuri/slack-tui/internal/ui/pane"
+	"github.com/kurenn/slack-tui/internal/data"
+	"github.com/kurenn/slack-tui/internal/ui/components"
+	"github.com/kurenn/slack-tui/internal/ui/pane"
 )
 
 func (m Model) View() string {
@@ -23,8 +23,7 @@ func (m Model) View() string {
 	}
 	if m.width < 50 || bodyH < 8 || centerW < 24 {
 		return lipgloss.NewStyle().Foreground(m.pal.Dim).
-			Render("slack-tui needs a larger terminal — widen the window" +
-				strings.Repeat(" ", 0))
+			Render("slack-tui needs a larger terminal — widen the window")
 	}
 
 	conv, _ := m.ws.Conversation(m.activeID)
@@ -57,7 +56,7 @@ func (m Model) View() string {
 	frame := strings.Join([]string{title, workspace, status}, "\n")
 
 	if m.loadErr != nil {
-		msg := " ⚠ slack: " + m.loadErr.Error()
+		msg := " ⚠ slack: " + m.loadErr.Error() + " · esc dismiss"
 		if r := []rune(msg); len(r) > m.width {
 			msg = string(r[:m.width-1]) + "…"
 		}
@@ -73,6 +72,21 @@ func (m Model) View() string {
 	}
 	if m.statusTextOpen {
 		frame = m.overlayStatusText(frame)
+	}
+	if m.suggestActive() {
+		frame = m.overlaySuggest(frame)
+	}
+	if m.findOpen {
+		frame = m.overlayFind(frame)
+	}
+	if m.picker.open {
+		frame = m.overlayPicker(frame)
+	}
+	if m.confirm.open {
+		frame = m.overlayConfirm(frame)
+	}
+	if m.helpOpen {
+		frame = m.overlayHelp(frame)
 	}
 	return frame
 }
@@ -102,22 +116,26 @@ func (m Model) overlayPalette(frame string) string {
 
 func (m Model) renderCenter(conv data.Conversation, w, bodyH int) string {
 	innerW := w - 2
-	paneH := bodyH - composerH
+	paneH := bodyH - m.composerHeight()
 	innerH := paneH - 2
 
-	msgs := m.curMsgs()
-	lines, starts := components.MessagesBody(m.pal, m.ws, msgs, m.msgSel, m.focus == focusMessages, m.density, innerW)
-	ss, se := 0, 0
-	if n := len(msgs); n > 0 {
-		mi := clamp(m.msgSel, 0, n-1)
-		ss, se = starts[mi], starts[mi+1]-1
-	}
 	var body string
-	if len(lines) <= innerH {
-		body = strings.Join(lines, "\n")
-	} else { // base scroll keeps the selection visible; msgExtra reads through tall messages
-		top := clamp(windowBaseTop(ss, se, innerH, len(lines))+m.msgExtra, 0, len(lines)-innerH)
-		body = strings.Join(lines[top:top+innerH], "\n")
+	msgs := m.curMsgs()
+	if m.loading[m.activeID] && len(msgs) == 0 {
+		body = lipgloss.NewStyle().Foreground(m.pal.Dim).Render("  loading…")
+	} else {
+		lines, starts := components.MessagesBody(m.pal, m.ws, msgs, m.msgSel, m.focus == focusMessages, m.density, innerW, m.newMark[m.activeID])
+		ss, se := 0, 0
+		if n := len(msgs); n > 0 {
+			mi := clamp(m.msgSel, 0, n-1)
+			ss, se = starts[mi], starts[mi+1]-1
+		}
+		if len(lines) <= innerH {
+			body = strings.Join(lines, "\n")
+		} else { // base scroll keeps the selection visible; msgExtra reads through tall messages
+			top := clamp(windowBaseTop(ss, se, innerH, len(lines))+m.msgExtra, 0, len(lines)-innerH)
+			body = strings.Join(lines[top:top+innerH], "\n")
+		}
 	}
 
 	title := "#" + conv.Name
@@ -139,7 +157,12 @@ func (m Model) renderCenter(conv data.Conversation, w, bodyH int) string {
 		prompt = "❯"
 	}
 	m.draft.Placeholder = "message " + m.locName(conv)
-	m.draft.Width = max(4, innerW-18)
+	if m.editingID != "" {
+		prompt = "✎"
+		m.draft.Placeholder = "edit message"
+	}
+	m.draft.SetWidth(max(4, innerW-24))
+	m.draft.SetHeight(m.composerHeight() - 2)
 	composer := components.Composer(m.pal, prompt, m.draft.View(), insertHere, w)
 
 	return lipgloss.JoinVertical(lipgloss.Left, msgsPane, composer)
@@ -148,7 +171,7 @@ func (m Model) renderCenter(conv data.Conversation, w, bodyH int) string {
 func (m Model) renderThread(conv data.Conversation, bodyH int) string {
 	innerW := threadWidth - 2
 	innerH := bodyH - 2
-	scrollH := innerH - composerH
+	scrollH := innerH - m.threadComposerHeight()
 
 	root, ok := m.threadRoot()
 	if !ok {
@@ -172,7 +195,8 @@ func (m Model) renderThread(conv data.Conversation, bodyH int) string {
 		prompt = "❯"
 	}
 	m.threadDraft.Placeholder = "reply in thread"
-	m.threadDraft.Width = max(4, innerW-18)
+	m.threadDraft.SetWidth(max(4, innerW-24))
+	m.threadDraft.SetHeight(m.threadComposerHeight() - 2)
 	composer := components.Composer(m.pal, prompt, m.threadDraft.View(), insertHere, innerW)
 
 	body := strings.Join(windowed, "\n") + "\n" + composer
@@ -198,6 +222,6 @@ func (m Model) hints() []components.Hint {
 	case m.focus == focusThread:
 		return []components.Hint{components.H("j/k", "replies"), components.H("i", "reply"), components.H("esc", "close"), components.H("h", "back")}
 	default:
-		return []components.Hint{components.H("j/k", "messages"), components.H("t", "thread"), components.H("i", "write"), components.H("h/l", "panes"), components.H("⌃k", "palette")}
+		return []components.Hint{components.H("j/k", "messages"), components.H("t", "thread"), components.H("i", "write"), components.H("h/l", "panes"), components.H("⌃k", "palette"), components.H("?", "help")}
 	}
 }

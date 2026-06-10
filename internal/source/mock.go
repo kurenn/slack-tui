@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/abrahamkuri/slack-tui/internal/data"
+	"github.com/kurenn/slack-tui/internal/data"
 )
 
 // Mock is an in-memory Source backed by the sample workspace. It returns
@@ -13,6 +13,8 @@ import (
 type Mock struct {
 	ws       *data.Workspace
 	messages map[string][]data.Message
+	reacted  map[string]bool // convID/msgID/name → I reacted (for toggling)
+	joinable []data.Conversation
 }
 
 // NewMock builds a mock source from the sample workspace.
@@ -22,7 +24,11 @@ func NewMock() *Mock {
 	for k, v := range ws.Messages {
 		msgs[k] = append([]data.Message(nil), v...)
 	}
-	return &Mock{ws: ws, messages: msgs}
+	return &Mock{ws: ws, messages: msgs, reacted: map[string]bool{},
+		joinable: []data.Conversation{
+			{ID: "platform", Type: "channel", Name: "platform", Topic: "infra · deploys · clusters"},
+			{ID: "watercooler", Type: "channel", Name: "watercooler", Topic: "off-topic, but the good kind"},
+		}}
 }
 
 func (m *Mock) Load() (*data.Workspace, error) { return m.ws, nil }
@@ -68,6 +74,89 @@ func (m *Mock) Unread(convID string) (int, error)      { return 0, nil }
 func (m *Mock) MarkRead(convID, ts string) error       { return nil }
 func (m *Mock) SetPresence(status string) error        { return nil }
 func (m *Mock) SetStatusText(text, emoji string) error { return nil }
+
+// React toggles a reaction in the in-memory store.
+func (m *Mock) React(convID, msgID, name string) (bool, error) {
+	key := convID + "/" + msgID + "/" + name
+	added := !m.reacted[key]
+	m.reacted[key] = added
+	glyph := emojiOf(name)
+	list := m.messages[convID]
+	for i := range list {
+		if list[i].ID != msgID {
+			continue
+		}
+		for j := range list[i].Reactions {
+			if list[i].Reactions[j].Emoji == glyph {
+				if added {
+					list[i].Reactions[j].Count++
+				} else if list[i].Reactions[j].Count--; list[i].Reactions[j].Count <= 0 {
+					list[i].Reactions = append(list[i].Reactions[:j], list[i].Reactions[j+1:]...)
+				}
+				return added, nil
+			}
+		}
+		if added {
+			list[i].Reactions = append(list[i].Reactions, data.Reaction{Emoji: glyph, Count: 1})
+		}
+	}
+	return added, nil
+}
+
+func (m *Mock) Edit(convID, msgID, text string) error {
+	for i := range m.messages[convID] {
+		if m.messages[convID][i].ID == msgID {
+			m.messages[convID][i].Text = text
+		}
+	}
+	return nil
+}
+
+func (m *Mock) Delete(convID, msgID string) error {
+	list := m.messages[convID]
+	for i := range list {
+		if list[i].ID == msgID {
+			m.messages[convID] = append(list[:i], list[i+1:]...)
+			return nil
+		}
+	}
+	return nil
+}
+
+// Joinable lists the not-yet-joined sample channels.
+func (m *Mock) Joinable() ([]data.Conversation, error) {
+	return append([]data.Conversation(nil), m.joinable...), nil
+}
+
+// Join hands the channel over; the app adds it to the workspace.
+func (m *Mock) Join(convID string) (data.Conversation, error) {
+	for i, c := range m.joinable {
+		if c.ID == convID {
+			m.joinable = append(m.joinable[:i], m.joinable[i+1:]...)
+			return c, nil
+		}
+	}
+	return data.Conversation{}, fmt.Errorf("unknown channel %q", convID)
+}
+
+// Search does a naive case-insensitive substring search over all messages.
+func (m *Mock) Search(query string) ([]SearchHit, error) {
+	q := strings.ToLower(query)
+	var out []SearchHit
+	for _, conv := range append(append([]data.Conversation{}, m.ws.Channels...), m.ws.DMs...) {
+		for _, msg := range m.messages[conv.ID] {
+			if !strings.Contains(strings.ToLower(msg.Text), q) {
+				continue
+			}
+			name := m.ws.Users[msg.UserID].Name
+			out = append(out, SearchHit{
+				ConvID: conv.ID, ConvName: conv.Name, UserName: name,
+				Time: msg.Time, MsgID: msg.ID, Text: msg.Text,
+			})
+		}
+	}
+	return out, nil
+}
 
 func hm() string    { now := time.Now(); return fmt.Sprintf("%02d:%02d", now.Hour(), now.Minute()) }
 func stamp() string { return strings.TrimPrefix(fmt.Sprintf("%d", time.Now().UnixNano()), "1") }

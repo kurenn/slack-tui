@@ -5,8 +5,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/abrahamkuri/slack-tui/internal/theme"
-	"github.com/abrahamkuri/slack-tui/internal/ui/components"
+	"github.com/kurenn/slack-tui/internal/theme"
+	"github.com/kurenn/slack-tui/internal/ui/components"
 )
 
 const paletteMaxRows = 8
@@ -32,6 +32,7 @@ func (m Model) paletteItems() []palItem {
 		hintsLabel = "Hide key hints"
 	}
 	items = append(items,
+		palItem{"cmd:join", components.PaletteItem{Icon: "+", Label: "Browse & join channels", Hint: "channels", Kind: "cmd"}},
 		palItem{"cmd:settings", components.PaletteItem{Icon: "⚙", Label: "Settings", Hint: "appearance · presence", Kind: "cmd"}},
 		palItem{"cmd:statustext", components.PaletteItem{Icon: "✎", Label: "Set status message", Hint: "presence", Kind: "cmd"}},
 		palItem{"cmd:theme", components.PaletteItem{Icon: "▣", Label: "Cycle theme", Hint: "appearance", Kind: "cmd"}},
@@ -44,8 +45,9 @@ func (m Model) paletteItems() []palItem {
 	return items
 }
 
-// filteredPalette applies the query (leading #@:/ stripped, substring match on
-// label+hint).
+// filteredPalette applies the query (leading #@:/ stripped). Substring matches
+// on label+hint rank first; fuzzy subsequence matches follow, so "bcknd" still
+// finds #backend.
 func (m Model) filteredPalette() []palItem {
 	q := strings.ToLower(strings.TrimSpace(m.paletteQuery.Value()))
 	q = strings.TrimLeft(q, "#@:/")
@@ -53,14 +55,28 @@ func (m Model) filteredPalette() []palItem {
 	if q == "" {
 		return all
 	}
-	var out []palItem
+	var subs, fuzzy []palItem
 	for _, it := range all {
 		hay := strings.ToLower(it.item.Label + " " + it.item.Hint)
-		if strings.Contains(hay, q) {
-			out = append(out, it)
+		switch {
+		case strings.Contains(hay, q):
+			subs = append(subs, it)
+		case fuzzyMatch(hay, q):
+			fuzzy = append(fuzzy, it)
 		}
 	}
-	return out
+	return append(subs, fuzzy...)
+}
+
+// fuzzyMatch reports whether q is a subsequence of hay (both lowercased).
+func fuzzyMatch(hay, q string) bool {
+	j := 0
+	for i := 0; i < len(hay) && j < len(q); i++ {
+		if hay[i] == q[j] {
+			j++
+		}
+	}
+	return j == len(q)
 }
 
 func (m *Model) openPalette() tea.Cmd {
@@ -110,6 +126,8 @@ func (m *Model) runPalette(id string) tea.Cmd {
 		return m.openChannel(strings.TrimPrefix(id, "ch:"))
 	case strings.HasPrefix(id, "dm:"):
 		return m.openChannel(strings.TrimPrefix(id, "dm:"))
+	case id == "cmd:join":
+		return m.openJoinPicker()
 	case id == "cmd:settings":
 		m.openSettings()
 	case id == "cmd:statustext":
@@ -127,9 +145,14 @@ func (m *Model) runPalette(id string) tea.Cmd {
 	case id == "cmd:dnd":
 		return m.setStatus("dnd")
 	case id == "cmd:read":
-		for k := range m.meta {
+		var unread []string
+		for k, mm := range m.meta {
+			if mm.Unread > 0 {
+				unread = append(unread, k)
+			}
 			m.meta[k] = components.Meta{Unread: 0, Mention: false}
 		}
+		return tea.Batch(m.markAllReadCmd(unread), m.titleCmd())
 	}
 	return nil
 }

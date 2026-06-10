@@ -36,6 +36,8 @@ func Key(m Model, key string) Model {
 		msg = tea.KeyMsg{Type: tea.KeyCtrlN}
 	case "ctrl+p":
 		msg = tea.KeyMsg{Type: tea.KeyCtrlP}
+	case "alt+enter":
+		msg = tea.KeyMsg{Type: tea.KeyEnter, Alt: true}
 	case "comma": // the dump replay splits on commas, so name it
 		msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(",")}
 	default:

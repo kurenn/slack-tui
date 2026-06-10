@@ -18,7 +18,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/abrahamkuri/slack-tui/internal/config"
+	"github.com/kurenn/slack-tui/internal/config"
 )
 
 const (
@@ -33,9 +33,10 @@ const (
 // UserScopes / BotScopes mirror slack-app-manifest.yaml.
 var (
 	UserScopes = []string{
-		"channels:history", "channels:read", "groups:history", "groups:read",
-		"im:history", "im:read", "mpim:history", "mpim:read", "users:read",
-		"chat:write", "reactions:read", "users:write", "dnd:write", "users.profile:write",
+		"channels:history", "channels:read", "channels:join", "groups:history",
+		"groups:read", "im:history", "im:read", "mpim:history", "mpim:read",
+		"users:read", "chat:write", "reactions:read", "reactions:write",
+		"users:write", "dnd:write", "users.profile:write", "search:read",
 	}
 	BotScopes = []string{
 		"channels:history", "channels:read", "groups:history", "im:history",

@@ -62,8 +62,82 @@ slack-tui          # no token? you get a mock workspace to play with
 
 ## Connect to Slack
 
-1. Create a Slack app from [`slack-app-manifest.yaml`](slack-app-manifest.yaml)
-   (api.slack.com/apps → *Create New App* → *From an app manifest*).
+1. Create a Slack app from the manifest below
+   (api.slack.com/apps → *Create New App* → *From a manifest* → paste it).
+   It's also in the repo as [JSON](slack-app-manifest.json) and
+   [YAML](slack-app-manifest.yaml).
+
+<details>
+<summary><b>App manifest (JSON)</b> — click to expand & copy</summary>
+
+```json
+{
+  "display_information": {
+    "name": "slack-tui",
+    "description": "A keyboard-first terminal Slack client",
+    "background_color": "#0d1117"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "slack-tui",
+      "always_online": false
+    }
+  },
+  "oauth_config": {
+    "redirect_urls": [
+      "http://localhost:9899/callback"
+    ],
+    "scopes": {
+      "user": [
+        "channels:history",
+        "channels:read",
+        "channels:join",
+        "groups:history",
+        "groups:read",
+        "im:history",
+        "im:read",
+        "mpim:history",
+        "mpim:read",
+        "users:read",
+        "chat:write",
+        "reactions:read",
+        "reactions:write",
+        "users:write",
+        "dnd:write",
+        "users.profile:write",
+        "search:read"
+      ],
+      "bot": [
+        "channels:history",
+        "channels:read",
+        "groups:history",
+        "im:history",
+        "mpim:history",
+        "users:read"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "bot_events": [
+        "message.channels",
+        "message.groups",
+        "message.im",
+        "message.mpim"
+      ]
+    },
+    "interactivity": {
+      "is_enabled": false
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": true,
+    "token_rotation_enabled": false
+  }
+}
+```
+
+</details>
+
 2. Sign in with your browser:
 
 ```sh

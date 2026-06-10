@@ -27,6 +27,7 @@ archives:
       - README.md
       - LICENSE
       - slack-app-manifest.yaml
+      - slack-app-manifest.json
 
 checksum:
   name_template: checksums.txt

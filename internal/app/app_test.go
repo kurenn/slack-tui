@@ -177,6 +177,34 @@ func TestSocketEventMarksUnread(t *testing.T) {
 	}
 }
 
+// TestThreadReplyToMyMessageFetches: a poll showing a new reply on a thread I
+// started fetches the replies (for the inline preview) and rings the bell —
+// agents answer in threads, which used to look like silence.
+func TestThreadReplyToMyMessageFetches(t *testing.T) {
+	m := newSized()
+	m.messages[m.activeID] = append(m.messages[m.activeID],
+		data.Message{ID: "mine", UserID: "me", Time: "10:00", Text: "hey bot"})
+	snapshot := append([]data.Message(nil), m.messages[m.activeID]...)
+	snapshot[len(snapshot)-1].ReplyCount = 1 // the agent answered in-thread
+	next, cmd := m.Update(historyMsg{convID: m.activeID, msgs: snapshot})
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("a new reply on my thread should trigger a replies fetch")
+	}
+	// a reply on someone else's thread stays quiet
+	m2 := newSized()
+	snap2 := append([]data.Message(nil), m2.curMsgs()...)
+	for i := range snap2 {
+		if snap2[i].UserID != "me" {
+			snap2[i].ReplyCount += 5
+		}
+	}
+	next, _ = m2.Update(historyMsg{convID: m2.activeID, msgs: snap2})
+	if got := next.(Model); len(got.curMsgs()) == 0 {
+		t.Fatal("history should apply")
+	}
+}
+
 // TestPollFollowsBottom: a new channel message arriving while the user is at the
 // bottom should move the selection to follow it.
 func TestPollFollowsBottom(t *testing.T) {

@@ -647,16 +647,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			return m, m.flash(msg.err)
 		}
-		m.applyHistory(msg.convID, msg.msgs)
+		cmds := m.applyHistory(msg.convID, msg.msgs)
 		if n, ok := m.pendingUnread[msg.convID]; ok { // async channel open: place the ── new ── rule
 			delete(m.pendingUnread, msg.convID)
 			m.applyNewMark(msg.convID, n)
 		}
 		m.applyPendingSelect(msg.convID)
 		if msg.convID == m.activeID {
-			return m, m.markReadCmd(msg.convID)
+			cmds = append(cmds, m.markReadCmd(msg.convID))
 		}
-		return m, nil
+		return m, tea.Batch(cmds...)
 	case reactMsg:
 		return m, m.applyReact(msg)
 	case editMsg:

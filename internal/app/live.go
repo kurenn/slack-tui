@@ -267,13 +267,30 @@ func (m Model) refresh() tea.Cmd {
 
 // applyHistory replaces a conversation's cached messages, carrying over any
 // already-loaded thread replies and preserving the selection (following the
-// bottom if the user was already there).
-func (m *Model) applyHistory(convID string, msgs []data.Message) {
+// bottom if the user was already there). It returns follow-up cmds: bots and
+// agents commonly answer in a thread under your message — when a poll shows a
+// new reply on a thread you started, fetch it (so the inline preview renders)
+// and ring the bell, otherwise the answer is just a silent "└ 1 reply" line.
+func (m *Model) applyHistory(convID string, msgs []data.Message) []tea.Cmd {
 	old := m.messages[convID]
 	loaded := map[string][]data.Reply{}
+	prevCount := map[string]int{}
 	for _, o := range old {
 		if len(o.Replies) > 0 {
 			loaded[o.ID] = o.Replies
+		}
+		prevCount[o.ID] = o.ReplyCount
+	}
+	var cmds []tea.Cmd
+	rung := false
+	for _, msg := range msgs {
+		prev, known := prevCount[msg.ID]
+		if known && msg.ReplyCount > prev && msg.UserID == m.ws.MeID {
+			cmds = append(cmds, m.repliesCmd(convID, msg.ID))
+			if !rung && msg.ID != m.threadRootID { // an open thread is already in view
+				cmds = append(cmds, bellCmd)
+				rung = true
+			}
 		}
 	}
 	for i := range msgs {
@@ -291,7 +308,7 @@ func (m *Model) applyHistory(convID string, msgs []data.Message) {
 
 	if convID != m.activeID {
 		m.messages[convID] = msgs
-		return
+		return cmds
 	}
 	atBottom := len(old) == 0 || m.msgSel >= len(old)-1
 	selID := ""
@@ -305,6 +322,7 @@ func (m *Model) applyHistory(convID string, msgs []data.Message) {
 	} else {
 		m.msgSel = indexOfMsg(msgs, selID)
 	}
+	return cmds
 }
 
 // loadOlderCmd fetches the page of history before the oldest cached message.

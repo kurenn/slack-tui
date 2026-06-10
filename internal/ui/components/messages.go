@@ -120,10 +120,20 @@ func messageLines(p theme.Palette, ws *data.Workspace, msg data.Message, w int, 
 		if len(msg.Replies) > count {
 			count = len(msg.Replies)
 		}
-		who := replyWho(ws, msg.Replies)
+		// With replies loaded, preview the latest one inline — bots and agents
+		// answer in threads, and a bare count reads like silence.
+		detail := replyWho(ws, msg.Replies)
+		if n := len(msg.Replies); n > 0 {
+			last := msg.Replies[n-1]
+			detail = ws.Users[last.UserID].Name
+			if detail == "" {
+				detail = last.UserID
+			}
+			detail += ": " + replyPreview(last.Text, bodyW-24)
+		}
 		aff := lipgloss.NewStyle().Foreground(p.Dim2).Render("└ ") +
 			lipgloss.NewStyle().Foreground(p.Accent).Bold(true).Render(fmt.Sprintf("%d %s ", count, plural(count, "reply", "replies"))) +
-			lipgloss.NewStyle().Foreground(p.Dim).Render(who) +
+			lipgloss.NewStyle().Foreground(p.Dim).Render(detail) +
 			lipgloss.NewStyle().Foreground(p.Dim2).Render("  ↵ open")
 		out = append(out, strings.Repeat(" ", timeGutter)+aff)
 	}
@@ -158,6 +168,19 @@ func replyWho(ws *data.Workspace, replies []data.Reply) string {
 		}
 	}
 	return strings.Join(names, ", ")
+}
+
+// replyPreview flattens a reply to one truncated line for the inline preview.
+func replyPreview(text string, w int) string {
+	text = strings.ReplaceAll(text, "\n", " ")
+	if w < 12 {
+		w = 12
+	}
+	r := []rune(text)
+	if len(r) > w {
+		return string(r[:w-1]) + "…"
+	}
+	return text
 }
 
 func plural(n int, one, many string) string {

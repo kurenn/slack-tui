@@ -153,6 +153,13 @@ For **live** channel unread, also generate an app-level token (`xapp-…`,
 Socket Mode) and invite the bot to the channels you care about — without it,
 unread badges refresh on a slow poll instead.
 
+> **Talking to bots?** Slack tags every API-posted message with the sending
+> app's `bot_id` (yours will carry slack-tui's). Bots with the classic
+> anti-loop filter — `if bot_id: ignore` — silently ignore everything sent
+> from slack-tui. If you control the bot, filter on *its own* `bot_id` (or
+> `subtype == "bot_message"` / missing `user`) instead: a message with both
+> `user` and `bot_id` is a human talking through an API client.
+
 ## Keys
 
 | | |

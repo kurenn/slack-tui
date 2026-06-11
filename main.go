@@ -18,6 +18,7 @@ import (
 	"github.com/kurenn/slack-tui/internal/app"
 	"github.com/kurenn/slack-tui/internal/auth"
 	"github.com/kurenn/slack-tui/internal/config"
+	"github.com/kurenn/slack-tui/internal/doctor"
 	"github.com/kurenn/slack-tui/internal/onboarding"
 	"github.com/kurenn/slack-tui/internal/root"
 )
@@ -40,6 +41,9 @@ func main() {
 	if len(os.Args) >= 2 && (os.Args[1] == "--version" || os.Args[1] == "-v" || os.Args[1] == "version") {
 		fmt.Println("slack-tui", versionString())
 		return
+	}
+	if len(os.Args) >= 2 && (os.Args[1] == "doctor" || os.Args[1] == "--doctor") {
+		os.Exit(doctor.Run(versionString()))
 	}
 	if len(os.Args) >= 2 && os.Args[1] == "login" {
 		if err := login(); err != nil {

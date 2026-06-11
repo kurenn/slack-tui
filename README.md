@@ -149,6 +149,11 @@ SLACK_CLIENT_ID=… SLACK_CLIENT_SECRET=… slack-tui login
 (0600). Env vars (`SLACK_USER_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_BOT_TOKEN`)
 override per-token.
 
+Run `slack-tui doctor` to diagnose your setup — it reports which tokens are
+in use (and warns when a stale env var overrides `tokens.json`), checks
+`auth.test`, flags any missing OAuth scopes, and probes Socket Mode. Tokens
+are masked in the output.
+
 For **live** channel unread, also generate an app-level token (`xapp-…`,
 Socket Mode) and invite the bot to the channels you care about — without it,
 unread badges refresh on a slow poll instead.

@@ -173,6 +173,7 @@ unread badges refresh on a slow poll instead.
 | `a` · `e` · `dd` · `y` | react · edit · delete · yank |
 | `o` | open message links/files |
 | `/` `n/N` · `s` | find in channel · search workspace |
+| `T` | threads inbox (threads you're in) |
 | `]` `[` | next/prev unread |
 | `Ctrl-K` | command palette (fuzzy) |
 | `,` · `?` | settings · help |

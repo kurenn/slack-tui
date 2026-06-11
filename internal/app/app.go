@@ -146,6 +146,9 @@ type Model struct {
 	newMark       map[string]string // convID → first-unread message ID (the ── new ── rule)
 	pendingUnread map[string]int    // unread count snapshot for channels opening async
 	pendingSelect map[string]string // convID → message ID to select once history lands
+	pendingThread map[string]string // convID → root ID to open as a thread once history lands
+
+	seenReplies map[string]int // (convID+"|"+rootID) → reply count last seen, for the threads inbox "new" badge
 
 	paletteOpen  bool
 	paletteQuery textinput.Model
@@ -268,6 +271,8 @@ func NewWith(src source.Source, prefs config.Prefs) Model {
 		newMark:         map[string]string{},
 		pendingUnread:   map[string]int{},
 		pendingSelect:   map[string]string{},
+		pendingThread:   map[string]string{},
+		seenReplies:     map[string]int{},
 	}
 	m.ensureHistory(activeID)
 	m.sideSel = m.flatIndexOf(activeID)
@@ -377,7 +382,11 @@ func (m *Model) openChannel(id string) tea.Cmd {
 	m.msgSel = max(0, len(m.messages[id])-1)
 	m.applyNewMark(id, unread)
 	m.applyPendingSelect(id)
-	return tea.Batch(m.markReadCmd(id), m.titleCmd()) // persist read state to the backend
+	cmds := []tea.Cmd{m.markReadCmd(id), m.titleCmd()} // persist read state to the backend
+	if c := m.applyPendingThread(id); c != nil {
+		cmds = append(cmds, c)
+	}
+	return tea.Batch(cmds...)
 }
 
 // applyNewMark places the ── new ── rule before the first unread message and
@@ -408,6 +417,22 @@ func (m *Model) applyPendingSelect(id string) {
 			return
 		}
 	}
+}
+
+// applyPendingThread opens a requested thread once its root is cached (threads
+// inbox jump). Mirrors applyPendingSelect: returns the openThread cmd, or nil.
+func (m *Model) applyPendingThread(id string) tea.Cmd {
+	root, ok := m.pendingThread[id]
+	if !ok {
+		return nil
+	}
+	for _, msg := range m.messages[id] {
+		if msg.ID == root {
+			delete(m.pendingThread, id)
+			return m.openThread(root)
+		}
+	}
+	return nil
 }
 
 // pageJump is the selection step for half-page scrolling (Ctrl-d/Ctrl-u).
@@ -527,8 +552,20 @@ func (m *Model) openThread(msgID string) tea.Cmd {
 	m.threadRootID = msgID
 	m.threadSel = 0
 	m.focus = focusThread
-	m.syncComposerSizes() // the center pane narrows when the thread opens
+	m.markThreadSeen(m.activeID, msgID) // opening clears the inbox "new" badge
+	m.syncComposerSizes()               // the center pane narrows when the thread opens
 	return m.repliesCmd(m.activeID, msgID)
+}
+
+// markThreadSeen records the current reply count of a thread root, so the
+// threads inbox only flags replies that arrived since you last looked.
+func (m *Model) markThreadSeen(convID, rootID string) {
+	for _, msg := range m.messages[convID] {
+		if msg.ID == rootID {
+			m.seenReplies[convID+"|"+rootID] = msg.ReplyCount
+			return
+		}
+	}
 }
 
 func (m *Model) closeThread() {
@@ -653,6 +690,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.applyNewMark(msg.convID, n)
 		}
 		m.applyPendingSelect(msg.convID)
+		if c := m.applyPendingThread(msg.convID); c != nil {
+			cmds = append(cmds, c)
+		}
 		if msg.convID == m.activeID {
 			cmds = append(cmds, m.markReadCmd(msg.convID))
 		}
@@ -938,6 +978,9 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "s": // workspace-wide message search
 		return m, m.openSearchPicker()
+
+	case "T": // threads inbox: every thread you participate in
+		return m, m.openThreadsPicker()
 
 	case "y": // yank the selected message's text to the clipboard
 		if msg, ok := m.selectedMsg(); ok {

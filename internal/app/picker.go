@@ -1,10 +1,13 @@
 package app
 
 import (
+	"fmt"
+	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/kurenn/slack-tui/internal/data"
 	"github.com/kurenn/slack-tui/internal/source"
 	"github.com/kurenn/slack-tui/internal/ui/components"
 )
@@ -167,6 +170,84 @@ func (m *Model) openSearchPicker() tea.Cmd {
 			return mm.openChannel(conv)
 		},
 	})
+}
+
+// openThreadsPicker is the threads inbox: every thread you take part in,
+// derived purely from the in-memory cache. Enter jumps to the channel and opens
+// the thread. A "(+k new)" hint flags replies that arrived since you last looked.
+func (m *Model) openThreadsPicker() tea.Cmd {
+	items := m.threadItems()
+	return m.openPicker("threads you're in…", items, pickerState{
+		kind: "threads", filter: true,
+		pick: func(mm *Model, id string) tea.Cmd { // id = "convID|rootID"
+			conv, root, ok := strings.Cut(id, "|")
+			if !ok {
+				return nil
+			}
+			mm.pendingSelect[conv] = root // select the root once history lands
+			mm.pendingThread[conv] = root // and open it as a thread
+			return mm.openChannel(conv)
+		},
+	})
+}
+
+// threadItems collects the threads you participate in, newest activity first.
+// Participation = you authored the root, or a loaded reply is yours.
+func (m Model) threadItems() []palItem {
+	var items []palItem
+	for convID, msgs := range m.messages {
+		for _, msg := range msgs {
+			if msg.ReplyCount == 0 {
+				continue
+			}
+			mine := msg.UserID == m.ws.MeID
+			for _, r := range msg.Replies {
+				if r.UserID == m.ws.MeID {
+					mine = true
+					break
+				}
+			}
+			if !mine {
+				continue
+			}
+			items = append(items, palItem{
+				id:   convID + "|" + msg.ID,
+				item: m.threadPaletteItem(convID, msg),
+			})
+		}
+	}
+	// Newest first: Slack ts strings sort lexicographically (the mock's ids do too).
+	sort.Slice(items, func(i, j int) bool { return items[i].id > items[j].id })
+	return items
+}
+
+// threadPaletteItem renders one inbox row: the flattened root text, the channel
+// (or @person for DMs), the reply count, and a "(+k new)" badge when unseen.
+func (m Model) threadPaletteItem(convID string, msg data.Message) components.PaletteItem {
+	label := truncRunes(strings.Join(strings.Fields(msg.Text), " "), 48)
+
+	where := convID
+	if c, ok := m.ws.Conversation(convID); ok {
+		if c.Type == "dm" {
+			where = "@" + c.Name
+		} else {
+			where = "#" + c.Name
+		}
+	}
+	hint := fmt.Sprintf("%s · %d replies", where, msg.ReplyCount)
+	if k := msg.ReplyCount - m.seenReplies[convID+"|"+msg.ID]; k > 0 {
+		hint += fmt.Sprintf(" (+%d new)", k)
+	}
+	return components.PaletteItem{Icon: "≡", Label: label, Hint: hint, Kind: "cmd"}
+}
+
+// truncRunes shortens s to at most n runes, appending an ellipsis when cut.
+func truncRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
 
 // openJoinPicker browses public channels you're not in; enter joins one.

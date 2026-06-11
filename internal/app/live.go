@@ -364,6 +364,7 @@ func (m *Model) applyReplies(convID, rootID string, replies []data.Reply) {
 	m.messages[convID] = list
 	if m.threadRootID == rootID {
 		m.threadSel = clamp(m.threadSel, 0, max(0, len(replies)-1))
+		m.seenReplies[convID+"|"+rootID] = len(replies) // viewing it clears the inbox "new" badge
 	}
 }
 

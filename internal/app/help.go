@@ -28,6 +28,7 @@ var helpRows = []helpRow{
 	{"o", "open message links"},
 	{"/ · n / N", "find in channel · next/prev"},
 	{"s", "search the workspace"},
+	{"T", "threads inbox"},
 	{"y", "yank message to clipboard"},
 	{"] / [", "next / prev unread"},
 	{"ctrl+k", "command palette"},

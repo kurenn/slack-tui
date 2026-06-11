@@ -166,14 +166,133 @@ func TestPollUpdatesOpenThread(t *testing.T) {
 func TestSocketEventMarksUnread(t *testing.T) {
 	m := newSized()
 	other := "random" // starts read in the mock
-	m.handleEvent(source.Event{ConvID: other, Msg: data.Message{UserID: "ada", Text: "hey @you", MentionsMe: true}})
+	m.applyEvent(source.Event{ConvID: other, Msg: data.Message{UserID: "ada", Text: "hey @you", MentionsMe: true}})
 	if m.meta[other].Unread != 1 || !m.meta[other].Mention {
 		t.Fatalf("non-active event should mark unread+mention, got %+v", m.meta[other])
 	}
-	before := m.meta[m.activeID]
-	m.handleEvent(source.Event{ConvID: m.activeID, Msg: data.Message{UserID: "ada", Text: "x"}})
-	if m.meta[m.activeID] != before {
+	beforeMeta := m.meta[m.activeID]
+	m.applyEvent(source.Event{ConvID: m.activeID, Msg: data.Message{ID: "live1", UserID: "ada", Text: "x"}})
+	if m.meta[m.activeID] != beforeMeta {
 		t.Error("active-channel event should not change its unread")
+	}
+}
+
+// TestActiveRootEventAppends: a root event in the active conversation appends
+// instantly, follows the bottom when the user is there, dedupes a repeat, and
+// leaves the selection put when the user is scrolled up.
+func TestActiveRootEventAppends(t *testing.T) {
+	m := newSized()
+	m.msgSel = len(m.curMsgs()) - 1 // at the bottom
+	before := len(m.curMsgs())
+	m.applyEvent(source.Event{ConvID: m.activeID, Msg: data.Message{ID: "live1", UserID: "ada", Time: "10:00", Text: "incoming"}})
+	if len(m.curMsgs()) != before+1 || m.curMsgs()[len(m.curMsgs())-1].Text != "incoming" {
+		t.Fatalf("active root event should append, got %d msgs", len(m.curMsgs()))
+	}
+	if m.msgSel != len(m.curMsgs())-1 {
+		t.Errorf("selection should follow the bottom, msgSel=%d", m.msgSel)
+	}
+	// Dedupe: the same ID again must not append twice.
+	m.applyEvent(source.Event{ConvID: m.activeID, Msg: data.Message{ID: "live1", UserID: "ada", Text: "incoming"}})
+	if len(m.curMsgs()) != before+1 {
+		t.Errorf("repeated ID should dedupe, got %d msgs", len(m.curMsgs()))
+	}
+	// Scrolled up: selection must not move.
+	m.msgSel = 0
+	m.applyEvent(source.Event{ConvID: m.activeID, Msg: data.Message{ID: "live2", UserID: "ada", Text: "more"}})
+	if m.msgSel != 0 {
+		t.Errorf("scrolled-up selection should stay put, msgSel=%d", m.msgSel)
+	}
+}
+
+// TestActiveRootEventUncached: an event for a conversation whose history isn't
+// cached (or is loading) does nothing — the in-flight fetch will include it.
+func TestActiveRootEventUncached(t *testing.T) {
+	m := newSized()
+	delete(m.messages, m.activeID)
+	m.applyEvent(source.Event{ConvID: m.activeID, Msg: data.Message{ID: "x", UserID: "ada", Text: "hi"}})
+	if _, ok := m.messages[m.activeID]; ok {
+		t.Error("event for an uncached conversation should not create a cache entry")
+	}
+	// Loading: present but in flight — leave it for the fetch.
+	m.messages[m.activeID] = []data.Message{{ID: "a", UserID: "ada", Text: "first"}}
+	m.loading[m.activeID] = true
+	m.applyEvent(source.Event{ConvID: m.activeID, Msg: data.Message{ID: "x", UserID: "ada", Text: "hi"}})
+	if len(m.messages[m.activeID]) != 1 {
+		t.Errorf("event during loading should not append, got %d", len(m.messages[m.activeID]))
+	}
+}
+
+// TestActiveReplyEventLands: a thread-reply event lands under its root, bumps
+// ReplyCount, dedupes, and rings the bell only when the root is mine and the
+// thread isn't open.
+func TestActiveReplyEventLands(t *testing.T) {
+	m := newSized()
+	root := data.Message{ID: "myroot", UserID: m.ws.MeID, Time: "10:00", Text: "hey bot", ReplyCount: 0}
+	m.messages[m.activeID] = append(m.messages[m.activeID], root)
+
+	cmds := m.applyEvent(source.Event{ConvID: m.activeID, ThreadTS: "myroot",
+		Msg: data.Message{ID: "rep1", UserID: "bot", Time: "10:01", Text: "answer"}})
+	got, _ := m.eachReplyRoot("myroot")
+	if len(got.Replies) != 1 || got.Replies[0].Text != "answer" || got.ReplyCount != 1 {
+		t.Fatalf("reply should land with ReplyCount=1, got %+v (count=%d)", got.Replies, got.ReplyCount)
+	}
+	if len(cmds) == 0 {
+		t.Error("a reply on my closed thread should ring the bell")
+	}
+	// Dedupe the same reply ID.
+	m.applyEvent(source.Event{ConvID: m.activeID, ThreadTS: "myroot",
+		Msg: data.Message{ID: "rep1", UserID: "bot", Text: "answer"}})
+	got, _ = m.eachReplyRoot("myroot")
+	if len(got.Replies) != 1 {
+		t.Errorf("repeated reply ID should dedupe, got %d", len(got.Replies))
+	}
+	// Thread open on my root → no bell.
+	m.threadRootID = "myroot"
+	cmds = m.applyEvent(source.Event{ConvID: m.activeID, ThreadTS: "myroot",
+		Msg: data.Message{ID: "rep2", UserID: "bot", Text: "more"}})
+	if len(cmds) != 0 {
+		t.Error("a reply while the thread is open should not ring the bell")
+	}
+}
+
+// TestActiveReplyEventNotMine: a reply on someone else's thread (root not mine)
+// stays quiet even when the thread is closed.
+func TestActiveReplyEventNotMine(t *testing.T) {
+	m := newSized()
+	m.messages[m.activeID] = append(m.messages[m.activeID],
+		data.Message{ID: "theirroot", UserID: "ada", Text: "ada's thread"})
+	cmds := m.applyEvent(source.Event{ConvID: m.activeID, ThreadTS: "theirroot",
+		Msg: data.Message{ID: "rep1", UserID: "bot", Text: "answer"}})
+	if len(cmds) != 0 {
+		t.Error("a reply on someone else's thread should not ring the bell")
+	}
+}
+
+// eachReplyRoot is a test helper: the cached root with the given ID (active conv).
+func (m *Model) eachReplyRoot(id string) (data.Message, bool) {
+	for _, msg := range m.messages[m.activeID] {
+		if msg.ID == id {
+			return msg, true
+		}
+	}
+	return data.Message{}, false
+}
+
+// TestApplySentReplyDedupe: when a live event already delivered the real reply,
+// reconciling the optimistic send drops the pending copy (no duplicate).
+func TestApplySentReplyDedupe(t *testing.T) {
+	m := newSized()
+	root := data.Message{ID: "root", UserID: m.ws.MeID, Text: "q",
+		Replies: []data.Reply{
+			{ID: "real", UserID: m.ws.MeID, Text: "hi"},     // live event already landed it
+			{ID: "pending-1", UserID: m.ws.MeID, Text: "hi"}, // our optimistic copy
+		}}
+	m.messages[m.activeID] = append(m.messages[m.activeID], root)
+	m.applySentReply(sentReplyMsg{convID: m.activeID, rootID: "root", pendingID: "pending-1",
+		reply: data.Reply{ID: "real", UserID: m.ws.MeID, Text: "hi"}})
+	got, _ := m.eachReplyRoot("root")
+	if len(got.Replies) != 1 || got.Replies[0].ID != "real" {
+		t.Fatalf("dedupe should leave exactly one real reply, got %+v", got.Replies)
 	}
 }
 

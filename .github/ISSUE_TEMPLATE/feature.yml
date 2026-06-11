@@ -1,0 +1,21 @@
+name: Feature request
+description: Propose an addition or change
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like?
+      description: The problem it solves, and roughly how you'd expect it to work.
+    validations:
+      required: true
+  - type: textarea
+    id: fit
+    attributes:
+      label: How does it stay lightweight?
+      description: >
+        slack-tui stays small, fast, and vim-oriented (see CONTRIBUTING.md).
+        A sentence on how this fits — e.g. "one keybinding + one API call" —
+        goes a long way.
+    validations:
+      required: false

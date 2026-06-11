@@ -11,7 +11,7 @@ Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 [![release](https://img.shields.io/github/v/release/kurenn/slack-tui)](https://github.com/kurenn/slack-tui/releases)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-<img src="docs/main.png" width="760" alt="slack-tui main view" />
+<img src="docs/demo.gif" width="760" alt="slack-tui demo" />
 
 </div>
 
@@ -27,8 +27,8 @@ Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 - **Mock workspace built in** — run it with zero setup to try the feel
 
 <div align="center">
-<img src="docs/palette.png" width="420" alt="command palette" /> <img src="docs/autocomplete.png" width="420" alt="mention autocomplete" />
-<img src="docs/thread.png" width="760" alt="thread view" />
+<img src="docs/main.png" width="420" alt="main view" /> <img src="docs/palette.png" width="420" alt="command palette" />
+<img src="docs/autocomplete.png" width="420" alt="mention autocomplete" /> <img src="docs/thread.png" width="420" alt="thread view" />
 </div>
 
 ## Install

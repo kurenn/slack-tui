@@ -22,7 +22,7 @@ func (m *Model) openFind() tea.Cmd {
 func (m Model) findKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
-		return m, tea.Quit
+		return m, m.quit()
 	case "esc":
 		m.findOpen = false
 		m.findInput.Blur()

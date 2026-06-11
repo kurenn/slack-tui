@@ -75,3 +75,17 @@ func ids(items []palItem) []string {
 	}
 	return out
 }
+
+// TestPaletteRecency: recently opened conversations rank first in the palette.
+func TestPaletteRecency(t *testing.T) {
+	m := newSized()
+	m.openChannel("random")
+	m.openChannel("dm_lin")
+	got := ids(m.paletteItems()[:2])
+	want := []string{"dm:dm_lin", "ch:random"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("palette order = %v, want %v first", got, want)
+		}
+	}
+}

@@ -24,7 +24,7 @@ func (m *Model) openConfirm(text string, action func(*Model) tea.Cmd) {
 func (m Model) confirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
-		return m, tea.Quit
+		return m, m.quit()
 	case "y", "enter":
 		action := m.confirm.action
 		m.confirm = confirmState{}

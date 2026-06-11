@@ -672,9 +672,14 @@ func slugify(s string) string {
 	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(s), " ", "-"))
 }
 
-// emojiOf maps common Slack reaction names to glyphs; falls back to :name:.
+// emojiOf maps a Slack reaction name to its glyph: curated overrides first,
+// then the full generated gemoji set; custom workspace emoji (images, no
+// glyph) fall back to :name:.
 func emojiOf(name string) string {
 	if e, ok := commonEmoji[name]; ok {
+		return e
+	}
+	if e, ok := gemoji[name]; ok {
 		return e
 	}
 	return ":" + name + ":"
@@ -685,9 +690,16 @@ func EmojiGlyph(name string) string { return emojiOf(name) }
 
 // EmojiNames returns all known emoji names, sorted (composer autocomplete).
 var EmojiNames = sync.OnceValue(func() []string {
-	names := make([]string, 0, len(commonEmoji))
+	seen := make(map[string]bool, len(gemoji)+len(commonEmoji))
+	names := make([]string, 0, len(gemoji)+len(commonEmoji))
 	for n := range commonEmoji {
+		seen[n] = true
 		names = append(names, n)
+	}
+	for n := range gemoji {
+		if !seen[n] {
+			names = append(names, n)
+		}
 	}
 	sort.Strings(names)
 	return names

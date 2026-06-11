@@ -142,3 +142,18 @@ func TestEmojiOf(t *testing.T) {
 		t.Error("unknown reaction should fall back to :name:")
 	}
 }
+
+// TestGemojiFallback: the generated map covers names the curated one doesn't.
+func TestGemojiFallback(t *testing.T) {
+	for name, want := range map[string]string{"avocado": "🥑", "face_with_monocle": "🧐", "shrimp": "🦐"} {
+		if got := emojiOf(name); got != want {
+			t.Errorf("emojiOf(%q) = %q, want %q", name, got, want)
+		}
+	}
+	if got := emojiOf("custom-workspace-emoji"); got != ":custom-workspace-emoji:" {
+		t.Errorf("unknown emoji should fall back to :name:, got %q", got)
+	}
+	if n := len(EmojiNames()); n < 1500 {
+		t.Errorf("EmojiNames should include the full gemoji set, got %d", n)
+	}
+}

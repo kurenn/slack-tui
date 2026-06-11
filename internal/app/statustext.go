@@ -21,7 +21,7 @@ func (m *Model) openStatusText() tea.Cmd {
 func (m Model) statusTextKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
-		return m, tea.Quit
+		return m, m.quit()
 	case "esc":
 		m.statusTextOpen = false
 		m.statusTextInput.Blur()

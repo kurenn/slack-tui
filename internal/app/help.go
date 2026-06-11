@@ -41,7 +41,7 @@ var helpRows = []helpRow{
 func (m Model) helpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
-		return m, tea.Quit
+		return m, m.quit()
 	case "esc", "q", "?", "enter":
 		m.helpOpen = false
 	}

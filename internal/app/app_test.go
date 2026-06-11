@@ -806,3 +806,28 @@ func TestThreadReply(t *testing.T) {
 		t.Errorf("reply text = %q, want lgtm", last.Text)
 	}
 }
+
+// TestQuitPersistsState: quitting saves drafts + recency; New-style restore
+// path is exercised via config round-trip.
+func TestQuitPersistsState(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	m := newSized()
+	m.persistState = true
+	m = Key(m, "i")
+	for _, r := range "wip" {
+		m = Key(m, string(r))
+	}
+	m = Key(m, "esc")
+	m.openChannel("random")
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	st, err := config.LoadState()
+	if err != nil {
+		t.Fatalf("state not saved: %v", err)
+	}
+	if st.Drafts["engineering"] != "wip" {
+		t.Errorf("draft not persisted, got %+v", st.Drafts)
+	}
+	if len(st.Recent) == 0 || st.Recent[0] != "random" {
+		t.Errorf("recency not persisted, got %v", st.Recent)
+	}
+}

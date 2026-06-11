@@ -150,6 +150,9 @@ type Model struct {
 
 	seenReplies map[string]int // (convID+"|"+rootID) → reply count last seen, for the threads inbox "new" badge
 
+	recent       []string // conversation IDs, most recently opened first (palette ordering)
+	persistState bool     // production only: save drafts+recency on quit (tests never write)
+
 	paletteOpen  bool
 	paletteQuery textinput.Model
 	paletteIndex int
@@ -185,12 +188,58 @@ func New() Model {
 	}
 	m := NewWith(src, prefs)
 
+	// Session state (drafts + palette recency) lives outside NewWith so tests
+	// stay hermetic; restore it and arm the save-on-quit.
+	if st, err := config.LoadState(); err == nil {
+		if st.Drafts != nil {
+			m.drafts = st.Drafts
+		}
+		m.recent = st.Recent
+		if d := m.drafts[m.activeID]; d != "" {
+			m.draft.SetValue(d)
+			m.syncComposerSizes()
+		}
+	}
+	m.persistState = true
+
 	// Real-time: start Socket Mode if the app + bot tokens are present (m.src
 	// may have fallen back to the mock if Load failed).
 	if sl, ok := m.src.(*source.Slack); ok && tok.App != "" && tok.Bot != "" {
 		sl.StartSocket(tok.App, tok.Bot)
 	}
 	return m
+}
+
+// quit persists session state and exits — every quit key path funnels here.
+func (m *Model) quit() tea.Cmd {
+	if m.persistState {
+		drafts := map[string]string{}
+		for k, v := range m.drafts {
+			if strings.TrimSpace(v) != "" {
+				drafts[k] = v
+			}
+		}
+		if v := m.draft.Value(); strings.TrimSpace(v) != "" && m.editingID == "" {
+			drafts[m.activeID] = v
+		}
+		_ = config.SaveState(config.State{Drafts: drafts, Recent: m.recent})
+	}
+	return tea.Quit
+}
+
+// touchRecent moves a conversation to the front of the recency order.
+func (m *Model) touchRecent(id string) {
+	out := make([]string, 0, len(m.recent)+1)
+	out = append(out, id)
+	for _, r := range m.recent {
+		if r != id {
+			out = append(out, r)
+		}
+	}
+	if len(out) > 50 {
+		out = out[:50]
+	}
+	m.recent = out
 }
 
 // NewWith builds the model on an explicit source and prefs. Tests inject the
@@ -361,6 +410,7 @@ func (m *Model) openChannel(id string) tea.Cmd {
 	}
 	unread := m.meta[id].Unread // captured before clearing — drives the ── new ── rule
 	m.activeID = id
+	m.touchRecent(id)
 	m.msgExtra = 0
 	m.meta[id] = components.Meta{Unread: 0, Mention: false}
 	m.focus = focusMessages
@@ -816,7 +866,7 @@ func (m Model) insertKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "ctrl+c":
-		return m, tea.Quit
+		return m, m.quit()
 	case "esc":
 		if m.editingID != "" {
 			m.cancelEdit()
@@ -850,7 +900,7 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch k {
 	case "ctrl+c", "q":
-		return m, tea.Quit
+		return m, m.quit()
 	case "ctrl+r": // manual refresh of the active channel + open thread
 		return m, m.refresh()
 	case ",": // open the settings overlay

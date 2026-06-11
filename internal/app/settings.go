@@ -38,7 +38,7 @@ func (m Model) settingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "enter", ",", "q", "ctrl+c":
 		if msg.String() == "ctrl+c" {
-			return m, tea.Quit
+			return m, m.quit()
 		}
 		m.closeSettings()
 	case "j", "down":

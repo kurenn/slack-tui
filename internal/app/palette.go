@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/kurenn/slack-tui/internal/data"
 	"github.com/kurenn/slack-tui/internal/theme"
 	"github.com/kurenn/slack-tui/internal/ui/components"
 )
@@ -18,14 +19,26 @@ type palItem struct {
 }
 
 // paletteItems builds the full (unfiltered) command list: jump to any
-// channel/DM, then the commands.
+// channel/DM — most recently opened first — then the commands.
 func (m Model) paletteItems() []palItem {
 	var items []palItem
-	for _, c := range m.ws.Channels {
-		items = append(items, palItem{"ch:" + c.ID, components.PaletteItem{Icon: "#", Label: c.Name, Hint: "channel", Kind: "channel"}})
+	convItem := func(c data.Conversation) palItem {
+		if c.Type == "dm" {
+			return palItem{"dm:" + c.ID, components.PaletteItem{Icon: "•", Label: c.Name, Hint: "direct message", Kind: "dm"}}
+		}
+		return palItem{"ch:" + c.ID, components.PaletteItem{Icon: "#", Label: c.Name, Hint: "channel", Kind: "channel"}}
 	}
-	for _, c := range m.ws.DMs {
-		items = append(items, palItem{"dm:" + c.ID, components.PaletteItem{Icon: "•", Label: c.Name, Hint: "direct message", Kind: "dm"}})
+	listed := map[string]bool{}
+	for _, id := range m.recent {
+		if c, ok := m.ws.Conversation(id); ok && !listed[id] {
+			listed[id] = true
+			items = append(items, convItem(c))
+		}
+	}
+	for _, c := range append(append([]data.Conversation{}, m.ws.Channels...), m.ws.DMs...) {
+		if !listed[c.ID] {
+			items = append(items, convItem(c))
+		}
 	}
 	hintsLabel := "Show key hints"
 	if m.showHints {

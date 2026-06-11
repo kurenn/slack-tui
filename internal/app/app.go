@@ -693,11 +693,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case eventMsg:
-		notify := m.handleEvent(msg.ev)
-		cmds := []tea.Cmd{m.titleCmd()}
-		if notify {
-			cmds = append(cmds, bellCmd)
-		}
+		cmds := append(m.applyEvent(msg.ev), m.titleCmd())
 		if s, ok := m.src.(streamer); ok {
 			cmds = append(cmds, listenEvents(s)) // keep listening
 		}
@@ -1105,9 +1101,22 @@ func (m *Model) applySentReply(msg sentReplyMsg) tea.Cmd {
 		return m.flash(msg.err)
 	}
 	m.eachRootMsg(msg.rootID, func(root *data.Message) {
+		// A live event (or poll) may have delivered the real reply already; if
+		// so, drop the pending copy instead of swapping (mirrors applySent).
+		already := false
+		for i := range root.Replies {
+			if root.Replies[i].ID == msg.reply.ID {
+				already = true
+				break
+			}
+		}
 		for i := range root.Replies {
 			if root.Replies[i].ID == msg.pendingID {
-				root.Replies[i] = msg.reply
+				if already {
+					root.Replies = append(root.Replies[:i], root.Replies[i+1:]...)
+				} else {
+					root.Replies[i] = msg.reply
+				}
 				return
 			}
 		}

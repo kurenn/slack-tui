@@ -175,20 +175,34 @@ func listenEvents(s streamer) tea.Cmd {
 	}
 }
 
-// handleEvent applies a live message event: a message in a non-active channel
-// bumps its unread (and mention) so the sidebar dot lights up immediately. The
-// active channel and open thread are kept fresh by polling. Returns whether the
-// event deserves a notification (mention or DM).
-func (m *Model) handleEvent(ev source.Event) bool {
-	if ev.ConvID == "" || ev.ConvID == m.activeID {
-		return false
+// applyEvent applies a live Socket Mode message event. For a non-active
+// conversation it bumps unread (and mention) so the sidebar dot lights up
+// immediately. For the active conversation it appends the message (or thread
+// reply) so it shows instantly instead of waiting for the 6s poll. It returns
+// follow-up cmds (a bell when warranted, a mark-read to keep the backend in
+// step); the caller batches in titleCmd and re-arms the listener.
+func (m *Model) applyEvent(ev source.Event) []tea.Cmd {
+	if ev.ConvID == "" {
+		return nil
 	}
+	if ev.ConvID != m.activeID {
+		return m.applyInactiveEvent(ev)
+	}
+	if ev.ThreadTS != "" {
+		return m.applyActiveReply(ev)
+	}
+	return m.applyActiveRoot(ev)
+}
+
+// applyInactiveEvent is the original behavior: light up unread/mention on a
+// conversation the user isn't looking at, ringing the bell for mentions and DMs.
+func (m *Model) applyInactiveEvent(ev source.Event) []tea.Cmd {
 	conv, ok := m.ws.Conversation(ev.ConvID)
 	if !ok {
-		return false
+		return nil
 	}
 	if ev.Msg.UserID == m.ws.MeID {
-		return false // our own message from another client
+		return nil // our own message from another client
 	}
 	meta := m.meta[ev.ConvID]
 	meta.Unread++
@@ -196,7 +210,63 @@ func (m *Model) handleEvent(ev source.Event) bool {
 		meta.Mention = true
 	}
 	m.meta[ev.ConvID] = meta
-	return ev.Msg.MentionsMe || conv.Type == "dm"
+	if ev.Msg.MentionsMe || conv.Type == "dm" {
+		return []tea.Cmd{bellCmd}
+	}
+	return nil
+}
+
+// applyActiveRoot appends a root message to the conversation in view. If history
+// isn't cached yet (or is in flight) it does nothing — the fetch will include
+// this message. The message is deduped by ID (the poll or our own optimistic
+// send may already have it). No bell: the user is looking at this conversation.
+func (m *Model) applyActiveRoot(ev source.Event) []tea.Cmd {
+	msgs, cached := m.messages[ev.ConvID]
+	if !cached || m.loading[ev.ConvID] {
+		return nil
+	}
+	for i := range msgs {
+		if msgs[i].ID == ev.Msg.ID {
+			return nil // already present (poll/optimistic send)
+		}
+	}
+	atBottom := len(msgs) == 0 || m.msgSel >= len(msgs)-1
+	m.messages[ev.ConvID] = append(msgs, ev.Msg)
+	if atBottom {
+		m.msgSel = len(m.messages[ev.ConvID]) - 1
+		m.msgExtra = 0
+	}
+	return []tea.Cmd{m.markReadCmd(ev.ConvID)}
+}
+
+// applyActiveReply lands a thread reply under its root in the conversation in
+// view. The reply is deduped by ID against the root's replies; ReplyCount is
+// kept consistent. It rings the bell only when the root is the user's own
+// message and that thread isn't currently open (an agent answered a thread I
+// started while I look elsewhere in the conversation). If the root isn't cached,
+// it does nothing — the poll will true it up.
+func (m *Model) applyActiveReply(ev source.Event) []tea.Cmd {
+	found, mine := false, false
+	m.eachRootMsg(ev.ThreadTS, func(root *data.Message) {
+		found = true
+		mine = root.UserID == m.ws.MeID
+		for i := range root.Replies {
+			if root.Replies[i].ID == ev.Msg.ID {
+				return // already present (poll/optimistic send)
+			}
+		}
+		root.Replies = append(root.Replies, data.Reply{
+			ID: ev.Msg.ID, UserID: ev.Msg.UserID, Time: ev.Msg.Time, Text: ev.Msg.Text,
+		})
+		root.ReplyCount = max(root.ReplyCount+1, len(root.Replies))
+	})
+	if !found {
+		return nil
+	}
+	if mine && m.threadRootID != ev.ThreadTS {
+		return []tea.Cmd{bellCmd}
+	}
+	return nil
 }
 
 // pollInterval is how often the active channel (and open thread) are refreshed.

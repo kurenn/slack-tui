@@ -40,14 +40,18 @@ func (s *Slack) StartSocket(appToken, botToken string) {
 				continue
 			}
 			me, ok := eapi.InnerEvent.Data.(*slackevents.MessageEvent)
-			if !ok || me.SubType != "" { // only ordinary new messages (skip joins/edits/etc.)
+			// Real new messages only: "" is a normal user message, "bot_message"
+			// is what agents/bots post (exactly what users wait for). Everything
+			// else (message_changed, message_deleted, channel_join, …) isn't a new
+			// message and is skipped.
+			if !ok || (me.SubType != "" && me.SubType != "bot_message") {
 				continue
 			}
 			s.events <- Event{
 				ConvID:   me.Channel,
 				ThreadTS: me.ThreadTimeStamp,
 				Msg: data.Message{
-					ID: me.TimeStamp, UserID: me.User, Time: tsTime(me.TimeStamp), Day: tsDay(me.TimeStamp),
+					ID: me.TimeStamp, UserID: socketAuthor(me), Time: tsTime(me.TimeStamp), Day: tsDay(me.TimeStamp),
 					Text: s.renderText(me.Text), MentionsMe: s.mentionsMe(me.Text),
 				},
 			}
@@ -59,6 +63,21 @@ func (s *Slack) StartSocket(appToken, botToken string) {
 			time.Sleep(5 * time.Second)
 		}
 	}()
+}
+
+// socketAuthor resolves who posted a Socket Mode message: bot_message events
+// carry no user id, only a bot identity — prefer User, then Username, then a
+// generic "bot" (mirrors messageAuthor for the Web API).
+func socketAuthor(me *slackevents.MessageEvent) string {
+	switch {
+	case me.User != "":
+		return me.User
+	case me.Username != "":
+		return me.Username
+	case me.BotID != "":
+		return "bot"
+	}
+	return me.User
 }
 
 // Events returns the real-time event stream, or nil if Socket Mode isn't running.

@@ -321,9 +321,17 @@ func connectionsOpen(appToken string) error {
 	return nil
 }
 
+// splitScopes parses the X-OAuth-Scopes header — Slack sends it
+// comma-separated without spaces ("identify,chat:write,…").
 func splitScopes(header string) []string {
 	if header == "" {
 		return nil
 	}
-	return strings.Split(header, ", ")
+	var out []string
+	for _, s := range strings.Split(header, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }

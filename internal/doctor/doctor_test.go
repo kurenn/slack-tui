@@ -93,4 +93,8 @@ func TestSplitScopes(t *testing.T) {
 	if got := splitScopes("chat:write, search:read"); !reflect.DeepEqual(got, want) {
 		t.Errorf("splitScopes = %v, want %v", got, want)
 	}
+	// Slack actually sends the header comma-separated WITHOUT spaces.
+	if got := splitScopes("identify,chat:write,search:read"); !reflect.DeepEqual(got, []string{"identify", "chat:write", "search:read"}) {
+		t.Errorf("splitScopes (no spaces) = %v", got)
+	}
 }

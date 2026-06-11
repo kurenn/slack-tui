@@ -112,6 +112,19 @@ func reportConfig() {
 // reportTokens classifies each token's source and prints a masked preview.
 func reportTokens(file config.Tokens, env envValues) {
 	fmt.Println("\nTokens")
+	if all, active, _ := config.LoadWorkspaces(); len(all) > 0 {
+		line := "  workspaces: "
+		for i, w := range all {
+			if i > 0 {
+				line += ", "
+			}
+			line += w.Name
+			if w.Name == active {
+				line += " (active)"
+			}
+		}
+		fmt.Println(line)
+	}
 	rows := []struct {
 		label, fileVal, envVal string
 	}{

@@ -831,3 +831,37 @@ func TestQuitPersistsState(t *testing.T) {
 		t.Errorf("recency not persisted, got %v", st.Recent)
 	}
 }
+
+// TestWorkspaceSwitchFlow: the picker lists workspaces; picking another one
+// persists it and emits ReloadMsg for root.
+func TestWorkspaceSwitchFlow(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	_ = config.SaveWorkspace(config.Workspace{Name: "coba", TeamID: "T1", Tokens: config.Tokens{User: "u1"}})
+	_ = config.SaveWorkspace(config.Workspace{Name: "personal", TeamID: "T2", Tokens: config.Tokens{User: "u2"}})
+	_ = config.SetActiveWorkspace("coba")
+	m := newSized()
+	m.workspaces, m.activeWorkspace, _ = config.LoadWorkspaces()
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = next.(Model)
+	m = Key(m, "switch works")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if cmd == nil || !m.picker.open || m.picker.kind != "workspace" {
+		t.Fatal("palette command should open the workspace picker")
+	}
+	m = Key(m, "personal")
+	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("picking a workspace should return a cmd")
+	}
+	if _, ok := cmd().(ReloadMsg); !ok {
+		t.Fatal("picking another workspace should emit ReloadMsg")
+	}
+	if _, active, _ := config.LoadWorkspaces(); active != "personal" {
+		t.Errorf("switch should persist, active = %q", active)
+	}
+	if tok, _ := config.LoadTokens(); tok.User != "u2" {
+		t.Errorf("LoadTokens should follow the switch, got %+v", tok)
+	}
+}

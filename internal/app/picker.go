@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/kurenn/slack-tui/internal/config"
 	"github.com/kurenn/slack-tui/internal/data"
 	"github.com/kurenn/slack-tui/internal/source"
 	"github.com/kurenn/slack-tui/internal/ui/components"
@@ -248,6 +249,37 @@ func truncRunes(s string, n int) string {
 		return s
 	}
 	return string(r[:n]) + "…"
+}
+
+// openWorkspacePicker switches the active workspace (tmux-session style: one
+// live workspace, the rest are a fast switch away). Picking persists the
+// choice and asks root to rebuild the app on the new tokens.
+func (m *Model) openWorkspacePicker() tea.Cmd {
+	items := make([]palItem, 0, len(m.workspaces))
+	for _, w := range m.workspaces {
+		hint := w.TeamID
+		if w.Name == m.activeWorkspace {
+			hint = "active"
+		}
+		items = append(items, palItem{id: w.Name, item: components.PaletteItem{
+			Icon: "⇄", Label: w.Name, Hint: hint, Kind: "cmd",
+		}})
+	}
+	active := m.activeWorkspace
+	return m.openPicker("switch workspace…", items, pickerState{
+		kind: "workspace", filter: true,
+		pick: func(mm *Model, name string) tea.Cmd {
+			if name == active {
+				return nil
+			}
+			return func() tea.Msg {
+				if err := config.SetActiveWorkspace(name); err != nil {
+					return wsMsg{err: err} // flashes via the existing handler
+				}
+				return ReloadMsg{}
+			}
+		},
+	})
 }
 
 // openJoinPicker browses public channels you're not in; enter joins one.

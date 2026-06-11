@@ -61,6 +61,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = modeLoading
 		return m, loadApp // re-reads the prefs onboarding just saved
 	}
+	if _, ok := msg.(app.ReloadMsg); ok { // workspace switch: rebuild on new tokens
+		m.app.Shutdown() // close the old workspace's Socket Mode connection
+		m.mode = modeLoading
+		return m, loadApp
+	}
 	if ready, ok := msg.(appReadyMsg); ok {
 		m.app = app.WithSize(ready.app, m.width, m.height)
 		m.mode = modeApp

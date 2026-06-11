@@ -27,12 +27,13 @@ func IsRateLimited(err error) bool {
 // Slack is a Source backed by the Slack Web API, authenticated with a user
 // token (xoxp). Network calls here run inside tea.Cmds.
 type Slack struct {
-	api       *slack.Client
-	meID      string
-	users     map[string]data.User // resolved lazily, seeded by Load
-	handleIDs map[string]string    // lowercased @handle → user ID (outgoing mentions)
-	events    chan Event           // Socket Mode stream (nil until StartSocket)
-	groupDMs  bool                 // include mpims in Load
+	api        *slack.Client
+	meID       string
+	users      map[string]data.User // resolved lazily, seeded by Load
+	handleIDs  map[string]string    // lowercased @handle → user ID (outgoing mentions)
+	events     chan Event           // Socket Mode stream (nil until StartSocket)
+	stopSocket context.CancelFunc   // tears down the socket (workspace switch)
+	groupDMs   bool                 // include mpims in Load
 }
 
 // NewSlack builds a Slack source from a user OAuth token (xoxp-…).
@@ -593,7 +594,7 @@ func (s *Slack) Search(query string) ([]SearchHit, error) {
 		}
 		out = append(out, SearchHit{
 			ConvID: hit.Channel.ID, ConvName: hit.Channel.Name, UserName: name,
-			Time: tsDay(hit.Timestamp) + " " + tsTime(hit.Timestamp),
+			Time:  tsDay(hit.Timestamp) + " " + tsTime(hit.Timestamp),
 			MsgID: hit.Timestamp, Text: s.renderText(hit.Text),
 		})
 	}

@@ -157,6 +157,7 @@ func (m Model) chooseAuth(opt authOpt) (Model, tea.Cmd) {
 
 type oauthDoneMsg struct {
 	toks config.Tokens
+	team auth.Team
 	err  error
 }
 
@@ -164,8 +165,8 @@ func oauthCmd(creds config.OAuthCreds) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
-		toks, err := auth.Login(ctx, creds)
-		return oauthDoneMsg{toks: toks, err: err}
+		toks, team, err := auth.Login(ctx, creds)
+		return oauthDoneMsg{toks: toks, team: team, err: err}
 	}
 }
 

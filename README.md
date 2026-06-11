@@ -158,6 +158,11 @@ For **live** channel unread, also generate an app-level token (`xapp-…`,
 Socket Mode) and invite the bot to the channels you care about — without it,
 unread badges refresh on a slow poll instead.
 
+**Multiple workspaces:** run `slack-tui login` once per workspace — each
+sign-in is saved under its team name. Switch in-app via `Ctrl-K` →
+*Switch workspace* (one workspace live at a time, tmux-session style), or
+launch directly into one with `slack-tui --workspace <name>`.
+
 > **Talking to bots?** Slack tags every API-posted message with the sending
 > app's `bot_id` (yours will carry slack-tui's). Bots with the classic
 > anti-loop filter — `if bot_id: ignore` — silently ignore everything sent

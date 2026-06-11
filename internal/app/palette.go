@@ -44,6 +44,10 @@ func (m Model) paletteItems() []palItem {
 	if m.showHints {
 		hintsLabel = "Hide key hints"
 	}
+	if len(m.workspaces) > 1 {
+		items = append(items,
+			palItem{"cmd:workspace", components.PaletteItem{Icon: "⇄", Label: "Switch workspace", Hint: m.activeWorkspace, Kind: "cmd"}})
+	}
 	items = append(items,
 		palItem{"cmd:join", components.PaletteItem{Icon: "+", Label: "Browse & join channels", Hint: "channels", Kind: "cmd"}},
 		palItem{"cmd:settings", components.PaletteItem{Icon: "⚙", Label: "Settings", Hint: "appearance · presence", Kind: "cmd"}},
@@ -139,6 +143,8 @@ func (m *Model) runPalette(id string) tea.Cmd {
 		return m.openChannel(strings.TrimPrefix(id, "ch:"))
 	case strings.HasPrefix(id, "dm:"):
 		return m.openChannel(strings.TrimPrefix(id, "dm:"))
+	case id == "cmd:workspace":
+		return m.openWorkspacePicker()
 	case id == "cmd:join":
 		return m.openJoinPicker()
 	case id == "cmd:settings":

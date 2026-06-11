@@ -153,6 +153,9 @@ type Model struct {
 	recent       []string // conversation IDs, most recently opened first (palette ordering)
 	persistState bool     // production only: save drafts+recency on quit (tests never write)
 
+	workspaces      []config.Workspace // signed-in workspaces (cached at startup)
+	activeWorkspace string
+
 	paletteOpen  bool
 	paletteQuery textinput.Model
 	paletteIndex int
@@ -201,6 +204,7 @@ func New() Model {
 		}
 	}
 	m.persistState = true
+	m.workspaces, m.activeWorkspace, _ = config.LoadWorkspaces()
 
 	// Real-time: start Socket Mode if the app + bot tokens are present (m.src
 	// may have fallen back to the mock if Load failed).
@@ -208,6 +212,18 @@ func New() Model {
 		sl.StartSocket(tok.App, tok.Bot)
 	}
 	return m
+}
+
+// ReloadMsg asks root to tear this app down and rebuild it — emitted after the
+// active workspace changed.
+type ReloadMsg struct{}
+
+// Shutdown releases the app's background resources (the Socket Mode
+// connection) before root discards the model on a workspace switch.
+func (m Model) Shutdown() {
+	if sl, ok := m.src.(*source.Slack); ok {
+		sl.StopSocket()
+	}
 }
 
 // quit persists session state and exits — every quit key path funnels here.

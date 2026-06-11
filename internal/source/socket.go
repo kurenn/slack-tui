@@ -1,6 +1,7 @@
 package source
 
 import (
+	"context"
 	"time"
 
 	"github.com/slack-go/slack"
@@ -22,13 +23,27 @@ type Event struct {
 // channels/DMs the app is a member of — that's a Slack platform constraint.
 // Run reconnects internally on normal disconnects; if it ever returns (a fatal
 // error), it's restarted with a backoff so live updates don't silently die.
+// StopSocket tears everything down (workspace switching).
 func (s *Slack) StartSocket(appToken, botToken string) {
 	bot := slack.New(botToken, slack.OptionAppLevelToken(appToken))
 	sm := socketmode.New(bot)
 	s.events = make(chan Event, 128)
+	ctx, cancel := context.WithCancel(context.Background())
+	s.stopSocket = cancel
 
 	go func() {
-		for evt := range sm.Events {
+		defer close(s.events) // sole sender; a closed stream ends listenEvents loops
+		for {
+			var evt socketmode.Event
+			var ok bool
+			select {
+			case <-ctx.Done():
+				return
+			case evt, ok = <-sm.Events:
+				if !ok {
+					return
+				}
+			}
 			if evt.Type != socketmode.EventTypeEventsAPI {
 				continue
 			}
@@ -59,10 +74,21 @@ func (s *Slack) StartSocket(appToken, botToken string) {
 	}()
 	go func() {
 		for {
-			_ = sm.Run()
+			_ = sm.RunContext(ctx)
+			if ctx.Err() != nil {
+				return
+			}
 			time.Sleep(5 * time.Second)
 		}
 	}()
+}
+
+// StopSocket closes the Socket Mode connection and its event stream.
+func (s *Slack) StopSocket() {
+	if s.stopSocket != nil {
+		s.stopSocket()
+		s.stopSocket = nil
+	}
 }
 
 // socketAuthor resolves who posted a Socket Mode message: bot_message events

@@ -3,6 +3,16 @@
 slack-tui follows semver-ish tags; every release ships binaries for
 macOS/Linux/Windows plus a Homebrew formula via goreleaser.
 
+## v0.3.0
+
+- **Workspace switching** — `slack-tui login` now saves each workspace under
+  its team name; switch in-app via `Ctrl-K` → *Switch workspace* (one live
+  workspace at a time, tmux-session style) or launch with
+  `slack-tui --workspace <name>`. Legacy single-workspace `tokens.json`
+  migrates automatically.
+- Socket Mode connections now tear down cleanly on switch
+- `doctor` lists signed-in workspaces
+
 ## v0.2.1
 
 - Full emoji coverage: ~2,000 Slack short names render as glyphs (generated

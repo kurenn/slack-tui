@@ -58,14 +58,14 @@ func AuthorizeURL(clientID, state string) string {
 // Login runs the full flow: starts the loopback server, opens the browser, waits
 // for the redirect, and exchanges the code for tokens. The bot token is merged
 // into the result; the caller keeps any existing app (xapp) token.
-func Login(ctx context.Context, creds config.OAuthCreds) (config.Tokens, error) {
+func Login(ctx context.Context, creds config.OAuthCreds) (config.Tokens, Team, error) {
 	state, err := randHex()
 	if err != nil {
-		return config.Tokens{}, err
+		return config.Tokens{}, Team{}, err
 	}
 	ln, err := net.Listen("tcp", listenAddr)
 	if err != nil {
-		return config.Tokens{}, fmt.Errorf("listen on %s: %w (another sign-in already running?)", listenAddr, err)
+		return config.Tokens{}, Team{}, fmt.Errorf("listen on %s: %w (another sign-in already running?)", listenAddr, err)
 	}
 	defer ln.Close()
 
@@ -98,17 +98,17 @@ func Login(ctx context.Context, creds config.OAuthCreds) (config.Tokens, error) 
 
 	select {
 	case <-ctx.Done():
-		return config.Tokens{}, ctx.Err()
+		return config.Tokens{}, Team{}, ctx.Err()
 	case res := <-resCh:
 		if res.err != nil {
-			return config.Tokens{}, res.err
+			return config.Tokens{}, Team{}, res.err
 		}
 		return Exchange(ctx, creds, res.code)
 	}
 }
 
 // Exchange swaps an authorization code for tokens via oauth.v2.access.
-func Exchange(ctx context.Context, creds config.OAuthCreds, code string) (config.Tokens, error) {
+func Exchange(ctx context.Context, creds config.OAuthCreds, code string) (config.Tokens, Team, error) {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, accessURL, strings.NewReader(url.Values{
 		"client_id":     {creds.ClientID},
 		"client_secret": {creds.ClientSecret},
@@ -118,33 +118,40 @@ func Exchange(ctx context.Context, creds config.OAuthCreds, code string) (config
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return config.Tokens{}, err
+		return config.Tokens{}, Team{}, err
 	}
 	defer resp.Body.Close()
 	return parseAccess(resp.Body)
+}
+
+// Team identifies the workspace the user just authorized.
+type Team struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type accessResponse struct {
 	OK          bool   `json:"ok"`
 	Error       string `json:"error"`
 	AccessToken string `json:"access_token"` // bot token (xoxb)
+	Team        Team   `json:"team"`
 	AuthedUser  struct {
 		AccessToken string `json:"access_token"` // user token (xoxp)
 	} `json:"authed_user"`
 }
 
-func parseAccess(r io.Reader) (config.Tokens, error) {
+func parseAccess(r io.Reader) (config.Tokens, Team, error) {
 	var out accessResponse
 	if err := json.NewDecoder(r).Decode(&out); err != nil {
-		return config.Tokens{}, err
+		return config.Tokens{}, Team{}, err
 	}
 	if !out.OK {
-		return config.Tokens{}, fmt.Errorf("oauth: %s", out.Error)
+		return config.Tokens{}, Team{}, fmt.Errorf("oauth: %s", out.Error)
 	}
 	if out.AuthedUser.AccessToken == "" {
-		return config.Tokens{}, fmt.Errorf("oauth: no user token granted (check user_scope)")
+		return config.Tokens{}, Team{}, fmt.Errorf("oauth: no user token granted (check user_scope)")
 	}
-	return config.Tokens{User: out.AuthedUser.AccessToken, Bot: out.AccessToken}, nil
+	return config.Tokens{User: out.AuthedUser.AccessToken, Bot: out.AccessToken}, out.Team, nil
 }
 
 func randHex() (string, error) {

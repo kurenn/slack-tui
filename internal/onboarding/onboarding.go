@@ -142,15 +142,26 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.oauthErr = msg.err.Error()
 			return m, nil
 		}
-		saved, _ := config.LoadTokens()
-		saved.User, saved.Bot = msg.toks.User, msg.toks.Bot // keep any existing app token
-		_ = config.SaveTokens(saved)
+		_ = config.SaveWorkspace(config.Workspace{
+			Name:   workspaceName(msg.team.Name),
+			TeamID: msg.team.ID,
+			Tokens: config.Tokens{User: msg.toks.User, Bot: msg.toks.Bot},
+		}) // SaveWorkspace keeps any stored app (xapp) token for this team
 		m.phase = phaseIdentity
 		return m, m.handle.Focus()
 	case tea.KeyMsg:
 		return m.onKey(msg)
 	}
 	return m, nil
+}
+
+// workspaceName slugifies a team name for the workspace list / --workspace flag.
+func workspaceName(team string) string {
+	s := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(team), " ", "-"))
+	if s == "" {
+		return "default"
+	}
+	return s
 }
 
 func (m Model) onTick() (Model, tea.Cmd) {

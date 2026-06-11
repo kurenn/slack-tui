@@ -52,6 +52,12 @@ func main() {
 		}
 		return
 	}
+	// `slack-tui --workspace <name>` opens a specific workspace for this run
+	// only (the in-app switcher persists; the flag deliberately doesn't).
+	if len(os.Args) >= 3 && os.Args[1] == "--workspace" {
+		config.ActiveOverride = os.Args[2]
+		os.Args = append(os.Args[:1], os.Args[3:]...)
+	}
 	// FORCE_COLOR makes --dump emit truecolor even without a TTY (for piping a
 	// colored frame into a renderer like `freeze`).
 	if os.Getenv("FORCE_COLOR") != "" {
@@ -107,18 +113,22 @@ func login() error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	toks, err := auth.Login(ctx, creds)
+	toks, team, err := auth.Login(ctx, creds)
 	if err != nil {
 		return err
 	}
-	saved, _ := config.LoadTokens()
-	saved.User, saved.Bot = toks.User, toks.Bot // keep any existing app (xapp) token
-	if err := config.SaveTokens(saved); err != nil {
+	name := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(team.Name), " ", "-"))
+	if name == "" {
+		name = "default"
+	}
+	ws := config.Workspace{Name: name, TeamID: team.ID, Tokens: config.Tokens{User: toks.User, Bot: toks.Bot}}
+	if err := config.SaveWorkspace(ws); err != nil { // upserts; keeps a stored xapp token for this team
 		return err
 	}
-	fmt.Println("✓ Signed in — tokens saved. Run `slack-tui` to start.")
-	if saved.App == "" {
-		fmt.Println("  (For live channel unread, also set SLACK_APP_TOKEN=xapp-… — OAuth can't issue it.)")
+	fmt.Printf("✓ Signed in to %s — saved as workspace %q (now active). Run `slack-tui` to start.\n", team.Name, name)
+	if all, _, _ := config.LoadWorkspaces(); len(all) > 1 {
+		fmt.Println("  Switch workspaces in-app via Ctrl-K → \"Switch workspace\", or `slack-tui --workspace <name>`.")
 	}
+	fmt.Println("  (For live channel unread, also provide an app-level xapp token — OAuth can't issue it.)")
 	return nil
 }

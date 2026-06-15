@@ -20,12 +20,21 @@ const dmPollInterval = 45 * time.Second
 // their startup values.
 const chanPollInterval = 90 * time.Second
 
+// presencePollInterval refreshes the presence dots for DM partners. Tier-3
+// rate limit is generous for the small DM set, so 60s is safe and responsive.
+const presencePollInterval = 60 * time.Second
+
 type (
-	dmPollMsg   struct{}
-	chanPollMsg struct{}
+	dmPollMsg      struct{}
+	chanPollMsg    struct{}
+	presencePollMsg struct{}
 	// unreadMsg carries the unread counts actually fetched this round (a
 	// rate-limit abort returns a partial map; absent ids stay untouched).
 	unreadMsg struct{ counts map[string]int }
+	// presenceUpdateMsg carries freshly fetched presence statuses for DM
+	// partners (id → "online" | "away"). Distinct from presenceMsg (which
+	// pushes the user's OWN presence and carries only an error).
+	presenceUpdateMsg struct{ statuses map[string]string }
 )
 
 func dmPollTick() tea.Cmd {
@@ -34,6 +43,10 @@ func dmPollTick() tea.Cmd {
 
 func chanPollTick() tea.Cmd {
 	return tea.Tick(chanPollInterval, func(time.Time) tea.Msg { return chanPollMsg{} })
+}
+
+func presencePollTick() tea.Cmd {
+	return tea.Tick(presencePollInterval, func(time.Time) tea.Msg { return presencePollMsg{} })
 }
 
 type presenceMsg struct{ err error }
@@ -66,6 +79,31 @@ func (m Model) dmIDs() []string {
 		}
 	}
 	return ids
+}
+
+// dmPartnerIDs collects the UserID of each 1:1 DM, skipping group DMs (mpims)
+// whose UserID is empty. These are the only dots visible in the sidebar.
+func (m Model) dmPartnerIDs() []string {
+	ids := make([]string, 0, len(m.ws.DMs))
+	for _, d := range m.ws.DMs {
+		if d.UserID != "" {
+			ids = append(ids, d.UserID)
+		}
+	}
+	return ids
+}
+
+// presenceCmd fetches current presence for all DM partners off the UI thread.
+func (m Model) presenceCmd() tea.Cmd {
+	ids := m.dmPartnerIDs()
+	if len(ids) == 0 {
+		return nil
+	}
+	src := m.src
+	return func() tea.Msg {
+		statuses, _ := src.Presence(ids)
+		return presenceUpdateMsg{statuses}
+	}
 }
 
 func (m Model) chanIDs() []string {

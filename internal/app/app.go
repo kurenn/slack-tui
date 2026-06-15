@@ -353,7 +353,9 @@ func (m Model) Init() tea.Cmd {
 		} else {
 			cmds = append(cmds, chanPollTick()) // no Socket Mode: poll channel unread instead
 		}
-		cmds = append(cmds, dmPollTick()) // periodic DM unread (Socket Mode can't see DMs)
+		cmds = append(cmds, dmPollTick())       // periodic DM unread (Socket Mode can't see DMs)
+		cmds = append(cmds, presencePollTick()) // periodic presence refresh for DM partners
+		cmds = append(cmds, m.presenceCmd())    // immediate first fetch so dots are right at startup
 	}
 	return tea.Batch(cmds...)
 }
@@ -730,6 +732,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(dmPollTick(), m.unreadCmd(m.dmIDs()))
 	case chanPollMsg:
 		return m, tea.Batch(chanPollTick(), m.unreadCmd(m.chanIDs()))
+	case presencePollMsg:
+		return m, tea.Batch(presencePollTick(), m.presenceCmd())
+	case presenceUpdateMsg:
+		for id, status := range msg.statuses {
+			if u, ok := m.ws.Users[id]; ok {
+				u.Status = status
+				m.ws.Users[id] = u
+			}
+		}
+		return m, nil
 	case unreadMsg:
 		for id, n := range msg.counts { // only ids actually fetched this round
 			if id == m.activeID {

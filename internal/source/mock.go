@@ -75,6 +75,18 @@ func (m *Mock) MarkRead(convID, ts string) error       { return nil }
 func (m *Mock) SetPresence(status string) error        { return nil }
 func (m *Mock) SetStatusText(text, emoji string) error { return nil }
 
+// Presence returns the mock workspace's already-set statuses for the requested
+// ids, so the no-token experience is deterministic and the poll sees no change.
+func (m *Mock) Presence(userIDs []string) (map[string]string, error) {
+	out := make(map[string]string, len(userIDs))
+	for _, id := range userIDs {
+		if u, ok := m.ws.Users[id]; ok {
+			out[id] = u.Status
+		}
+	}
+	return out, nil
+}
+
 // React toggles a reaction in the in-memory store.
 func (m *Mock) React(convID, msgID, name string) (bool, error) {
 	key := convID + "/" + msgID + "/" + name

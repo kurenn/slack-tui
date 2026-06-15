@@ -343,6 +343,62 @@ func TestPollFollowsBottom(t *testing.T) {
 
 func newSized() Model { return WithSize(newTest(), 100, 30) }
 
+// TestPresenceUpdateMsgApplied: feeding a presenceUpdateMsg through Update
+// writes the status for included ids and leaves excluded ids untouched.
+func TestPresenceUpdateMsgApplied(t *testing.T) {
+	m := newSized()
+
+	// Verify baseline (mock statuses from data.Mock())
+	if m.ws.Users["ada"].Status != "online" {
+		t.Fatalf("expected ada online at baseline, got %q", m.ws.Users["ada"].Status)
+	}
+	if m.ws.Users["marco"].Status != "away" {
+		t.Fatalf("expected marco away at baseline, got %q", m.ws.Users["marco"].Status)
+	}
+
+	// Feed an update: ada→away, but omit marco.
+	next, _ := m.Update(presenceUpdateMsg{statuses: map[string]string{"ada": "away"}})
+	m = next.(Model)
+
+	if got := m.ws.Users["ada"].Status; got != "away" {
+		t.Errorf("ada status = %q after update, want away", got)
+	}
+	// marco was not in the update map — must stay untouched.
+	if got := m.ws.Users["marco"].Status; got != "away" {
+		t.Errorf("marco status = %q, should be unchanged", got)
+	}
+}
+
+// TestPresenceCmdGathersDMPartnerUserIDs: presenceCmd uses UserID (the DM
+// counterpart), not the conversation ID, and skips group DMs (empty UserID).
+func TestPresenceCmdGathersDMPartnerUserIDs(t *testing.T) {
+	m := newSized()
+
+	// Inject a group DM (mpim) with no UserID to confirm it is skipped.
+	m.ws.DMs = append(m.ws.DMs, data.Conversation{ID: "mpim_grp", Type: "dm", Name: "group", UserID: ""})
+
+	ids := m.dmPartnerIDs()
+
+	// All collected ids must be non-empty (group DMs excluded).
+	for _, id := range ids {
+		if id == "" {
+			t.Error("dmPartnerIDs must not include empty UserID (group DM)")
+		}
+	}
+	// The mock workspace has four 1:1 DMs: ada, lin, marco, priya.
+	expected := map[string]bool{"ada": false, "lin": false, "marco": false, "priya": false}
+	for _, id := range ids {
+		if _, known := expected[id]; known {
+			expected[id] = true
+		}
+	}
+	for id, found := range expected {
+		if !found {
+			t.Errorf("dmPartnerIDs missing %q", id)
+		}
+	}
+}
+
 func TestInitialState(t *testing.T) {
 	m := newTest()
 	if m.focus != focusMessages {

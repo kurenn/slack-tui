@@ -29,6 +29,10 @@ type Source interface {
 	SetPresence(status string) error
 	// SetStatusText sets the custom status message (text + optional :emoji:).
 	SetStatusText(text, emoji string) error
+	// Presence fetches current presence for the given users (DM partners),
+	// returning id → status ("online" | "away"). Best-effort: ids that error
+	// are omitted.
+	Presence(userIDs []string) (map[string]string, error)
 	// React toggles an emoji reaction (by Slack name, e.g. "thumbsup") on a
 	// message. Returns whether the reaction was added (false = removed).
 	React(convID, msgID, name string) (added bool, err error)

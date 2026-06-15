@@ -134,6 +134,38 @@ func TestColorForIsStable(t *testing.T) {
 	}
 }
 
+// TestMockPresenceReturnsStatuses: Mock.Presence echoes back the workspace's
+// own statuses for the requested ids — deterministic, no network.
+func TestMockPresenceReturnsStatuses(t *testing.T) {
+	m := NewMock()
+	got, err := m.Presence([]string{"ada", "marco", "tomo"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := map[string]string{
+		"ada":   "online",
+		"marco": "away",
+		"tomo":  "dnd",
+	}
+	for id, wantStatus := range want {
+		if got[id] != wantStatus {
+			t.Errorf("Presence[%q] = %q, want %q", id, got[id], wantStatus)
+		}
+	}
+}
+
+// TestMockPresenceUnknownID: ids not in the workspace are silently omitted.
+func TestMockPresenceUnknownID(t *testing.T) {
+	m := NewMock()
+	got, err := m.Presence([]string{"nobody"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := got["nobody"]; ok {
+		t.Error("unknown id should be omitted from the result")
+	}
+}
+
 func TestEmojiOf(t *testing.T) {
 	if emojiOf("fire") != "🔥" {
 		t.Error("known reaction should map to a glyph")

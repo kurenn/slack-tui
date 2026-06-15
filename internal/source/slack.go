@@ -221,6 +221,53 @@ func (s *Slack) SetStatusText(text, emoji string) error {
 	return s.api.SetUserCustomStatus(text, emoji, 0)
 }
 
+// Presence fetches current presence for the given DM partner user IDs, using
+// the same bounded-concurrency pattern as fillUnread so we don't hammer Tier-3
+// rate limits. active→online, away→away; ids that error are omitted.
+func (s *Slack) Presence(userIDs []string) (map[string]string, error) {
+	if len(userIDs) == 0 {
+		return map[string]string{}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out := make(map[string]string, len(userIDs))
+	sem := make(chan struct{}, 8)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var limited atomic.Bool
+	for _, id := range userIDs {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				return
+			}
+			if limited.Load() {
+				return
+			}
+			p, err := s.api.GetUserPresence(id)
+			if err != nil {
+				if IsRateLimited(err) {
+					limited.Store(true)
+				}
+				return
+			}
+			status := "away"
+			if p.Presence == "active" {
+				status = "online"
+			}
+			mu.Lock()
+			out[id] = status
+			mu.Unlock()
+		}(id)
+	}
+	wg.Wait()
+	return out, nil
+}
+
 // fillUnread populates each conversation's unread count via conversations.info,
 // concurrently and bounded, with an overall timeout so startup can't hang. A
 // rate-limit error stops the remaining lookups (they'd all fail the same way).

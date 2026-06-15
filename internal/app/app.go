@@ -168,6 +168,18 @@ type Model struct {
 
 	width, height int
 	gPending      time.Time
+
+	// geomCache memoises the MessagesBody geometry for the active conversation.
+	// starts/total depend on content, width, density, and the newMark — but NOT
+	// on selIndex or focus (selection only restyles lines, never adds/removes them).
+	// msgGen is a monotone counter bumped by invalidateGeom() at every mutation
+	// site; width, density, and newMark are encoded directly in the key string.
+	geomCache struct {
+		key    string
+		starts []int
+		total  int
+	}
+	msgGen int // bumped whenever active-conversation layout could change
 }
 
 // New builds the production model from saved (or default) prefs. The data
@@ -358,6 +370,12 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// invalidateGeom bumps the generation counter so the next msgGeom call
+// recomputes from scratch. Call it at every site that changes the line layout
+// of the active conversation's messages (content, reactions, replies, newMark).
+// An over-bump is cheap (one recompute); an under-bump would return stale geometry.
+func (m *Model) invalidateGeom() { m.msgGen++ }
+
 // ── derived helpers ─────────────────────────────────────────────────────────
 
 func (m Model) sideItems() []components.SideItem {
@@ -416,6 +434,9 @@ func (m *Model) ensureHistory(id string) {
 		m.loadErr = err
 	}
 	m.messages[id] = msgs
+	if id == m.activeID {
+		m.invalidateGeom()
+	}
 }
 
 func (m *Model) openChannel(id string) tea.Cmd {
@@ -511,15 +532,42 @@ func (m Model) pageJump() int {
 
 // msgGeom computes the selected-message line span, total body lines, and the
 // message-pane inner height — for line-accurate scrolling.
-func (m Model) msgGeom() (ss, se, total, innerH int) {
+//
+// starts/total are memoised in geomCache: they depend on content, width,
+// density, and the newMark but NOT on selIndex or focus (selection only
+// restyles existing lines via a left bar + background fill; it never adds or
+// removes lines). The cache is invalidated via invalidateGeom() at every
+// mutation site. innerH is geometry only — never cached.
+func (m *Model) msgGeom() (ss, se, total, innerH int) {
 	centerW := m.width - sidebarWidth - 1
 	if m.threadOpen() {
 		centerW = m.width - sidebarWidth - threadWidth - 2
 	}
 	innerH = (m.height - 2 - m.composerHeight()) - 2
+
+	// Build a cheap fingerprint from all inputs that affect line layout.
+	// fmt.Sprintf is ~50 ns for these small fields — negligible vs MessagesBody.
+	key := fmt.Sprintf("%s|%d|%d|%s|%d", m.activeID, centerW-2, m.density, m.newMark[m.activeID], m.msgGen)
+	if m.geomCache.key == key {
+		starts := m.geomCache.starts
+		total = m.geomCache.total
+		msgs := m.curMsgs()
+		if n := len(msgs); n > 0 {
+			mi := clamp(m.msgSel, 0, n-1)
+			ss, se = starts[mi], starts[mi+1]-1
+		}
+		return
+	}
+
+	// Cache miss: recompute. selIndex/focused are set to dummy values because
+	// they don't affect starts or len(lines) — only line content (styling).
 	msgs := m.curMsgs()
-	lines, starts := components.MessagesBody(m.pal, m.ws, msgs, m.msgSel, m.focus == focusMessages, m.density, centerW-2, m.newMark[m.activeID])
+	lines, starts := components.MessagesBody(m.pal, m.ws, msgs, -1, false, m.density, centerW-2, m.newMark[m.activeID])
 	total = len(lines)
+	m.geomCache.key = key
+	m.geomCache.starts = starts
+	m.geomCache.total = total
+
 	if n := len(msgs); n > 0 {
 		mi := clamp(m.msgSel, 0, n-1)
 		ss, se = starts[mi], starts[mi+1]-1
@@ -671,6 +719,7 @@ func (m *Model) sendMessage() tea.Cmd {
 	pid := fmt.Sprintf("%s%d", pendingPrefix, m.pendingSeq)
 	m.messages[m.activeID] = append(m.messages[m.activeID],
 		data.Message{ID: pid, UserID: m.ws.MeID, Time: nowClock(), Text: text})
+	m.invalidateGeom()
 	m.draft.SetValue("")
 	m.clearSuggest()
 	m.syncComposerSizes()
@@ -705,6 +754,8 @@ func (m *Model) sendReply() tea.Cmd {
 }
 
 // eachRootMsg runs fn on every cached copy of the message with the given ID.
+// Because replies and reply counts affect the affordance line (geometry), we
+// invalidate the cache unconditionally — the mutation is the uncommon path.
 func (m *Model) eachRootMsg(id string, fn func(*data.Message)) {
 	for k, list := range m.messages {
 		for i := range list {
@@ -714,6 +765,7 @@ func (m *Model) eachRootMsg(id string, fn func(*data.Message)) {
 		}
 		m.messages[k] = list
 	}
+	m.invalidateGeom()
 }
 
 // ── update ──────────────────────────────────────────────────────────────────
@@ -1167,6 +1219,7 @@ func (m *Model) applySent(msg sentMsg) tea.Cmd {
 			m.messages[msg.convID] = append(list[:idx], list[idx+1:]...)
 			if msg.convID == m.activeID {
 				m.msgSel = clamp(m.msgSel, 0, max(0, len(m.messages[msg.convID])-1))
+				m.invalidateGeom()
 			}
 		}
 		if msg.convID == m.activeID && strings.TrimSpace(m.draft.Value()) == "" {
@@ -1188,6 +1241,9 @@ func (m *Model) applySent(msg sentMsg) tea.Cmd {
 		} else {
 			list[idx] = msg.msg
 			m.messages[msg.convID] = list
+		}
+		if msg.convID == m.activeID {
+			m.invalidateGeom()
 		}
 	}
 	return nil

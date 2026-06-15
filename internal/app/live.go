@@ -232,6 +232,7 @@ func (m *Model) applyActiveRoot(ev source.Event) []tea.Cmd {
 	}
 	atBottom := len(msgs) == 0 || m.msgSel >= len(msgs)-1
 	m.messages[ev.ConvID] = append(msgs, ev.Msg)
+	m.invalidateGeom()
 	if atBottom {
 		m.msgSel = len(m.messages[ev.ConvID]) - 1
 		m.msgExtra = 0
@@ -386,6 +387,7 @@ func (m *Model) applyHistory(convID string, msgs []data.Message) []tea.Cmd {
 		selID = old[m.msgSel].ID
 	}
 	m.messages[convID] = msgs
+	m.invalidateGeom()
 	if atBottom {
 		m.msgSel = max(0, len(msgs)-1)
 		m.msgExtra = 0
@@ -419,6 +421,7 @@ func (m *Model) prependHistory(convID string, older []data.Message) {
 	m.messages[convID] = append(older, m.messages[convID]...)
 	if convID == m.activeID {
 		m.msgSel += len(older)
+		m.invalidateGeom()
 	}
 }
 
@@ -432,6 +435,9 @@ func (m *Model) applyReplies(convID, rootID string, replies []data.Reply) {
 		}
 	}
 	m.messages[convID] = list
+	if convID == m.activeID {
+		m.invalidateGeom() // reply count + preview text affect the affordance line
+	}
 	if m.threadRootID == rootID {
 		m.threadSel = clamp(m.threadSel, 0, max(0, len(replies)-1))
 		m.seenReplies[convID+"|"+rootID] = len(replies) // viewing it clears the inbox "new" badge

@@ -94,11 +94,17 @@ func (m *Model) applyReact(msg reactMsg) tea.Cmd {
 			} else if list[i].Reactions[j].Count--; list[i].Reactions[j].Count <= 0 {
 				list[i].Reactions = append(list[i].Reactions[:j], list[i].Reactions[j+1:]...)
 			}
+			if msg.convID == m.activeID {
+				m.invalidateGeom() // reaction row may appear or disappear
+			}
 			return nil
 		}
 		if msg.added {
 			list[i].Reactions = append(list[i].Reactions, data.Reaction{Emoji: glyph, Count: 1})
 		}
+	}
+	if msg.convID == m.activeID {
+		m.invalidateGeom() // a new reaction row was added
 	}
 	return nil
 }
@@ -137,6 +143,7 @@ func (m *Model) applyEditDraft() tea.Cmd {
 			list[i].Text = text
 		}
 	}
+	m.invalidateGeom() // edited text may wrap to a different number of lines
 	src, conv := m.src, m.activeID
 	return func() tea.Msg { return editMsg{conv, id, src.Edit(conv, id, text)} }
 }
@@ -154,6 +161,7 @@ func (m *Model) deleteMessage(msgID string) tea.Cmd {
 	}
 	m.msgSel = clamp(m.msgSel, 0, max(0, len(m.messages[m.activeID])-1))
 	m.msgExtra = 0
+	m.invalidateGeom()
 	src, conv := m.src, m.activeID
 	return func() tea.Msg { return deleteMsg{conv, msgID, src.Delete(conv, msgID)} }
 }

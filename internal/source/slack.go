@@ -305,9 +305,22 @@ func (s *Slack) fillUnread(convs []data.Conversation) {
 	wg.Wait()
 }
 
+// readTimeout bounds a single read call. slack-go's default client has no
+// timeout, so a black-holed connection (laptop sleep, dropped wifi mid-call)
+// would otherwise leave a conversation stuck on "loading…" forever. Generous
+// enough that a slow-but-real fetch still completes; on expiry the caller
+// surfaces an error the user can Ctrl-R retry.
+const readTimeout = 20 * time.Second
+
+func readCtx() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), readTimeout)
+}
+
 // History fetches recent messages (newest last), resolving threads.
 func (s *Slack) History(convID string) ([]data.Message, error) {
-	resp, err := s.api.GetConversationHistory(&slack.GetConversationHistoryParameters{ChannelID: convID, Limit: 50})
+	ctx, cancel := readCtx()
+	defer cancel()
+	resp, err := s.api.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{ChannelID: convID, Limit: 50})
 	if err != nil {
 		return nil, fmt.Errorf("history: %w", err)
 	}
@@ -320,7 +333,9 @@ func (s *Slack) History(convID string) ([]data.Message, error) {
 
 // HistoryBefore fetches the page of messages older than beforeTS.
 func (s *Slack) HistoryBefore(convID, beforeTS string) ([]data.Message, error) {
-	resp, err := s.api.GetConversationHistory(&slack.GetConversationHistoryParameters{
+	ctx, cancel := readCtx()
+	defer cancel()
+	resp, err := s.api.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{
 		ChannelID: convID, Limit: 50, Latest: beforeTS, Inclusive: false,
 	})
 	if err != nil {
@@ -385,10 +400,12 @@ func (s *Slack) encodeMentions(text string) string {
 // Replies fetches a thread's replies, following pagination so long threads
 // aren't silently truncated (lazy — called when a thread is opened or polled).
 func (s *Slack) Replies(convID, rootID string) ([]data.Reply, error) {
+	ctx, cancel := readCtx()
+	defer cancel()
 	params := &slack.GetConversationRepliesParameters{ChannelID: convID, Timestamp: rootID, Limit: 200}
 	var out []data.Reply
 	for {
-		reps, hasMore, next, err := s.api.GetConversationReplies(params)
+		reps, hasMore, next, err := s.api.GetConversationRepliesContext(ctx, params)
 		if err != nil {
 			return nil, err
 		}

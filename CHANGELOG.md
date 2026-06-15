@@ -3,6 +3,17 @@
 slack-tui follows semver-ish tags; every release ships binaries for
 macOS/Linux/Windows plus a Homebrew formula via goreleaser.
 
+## v0.4.0
+
+- **Real presence** — DM partners' online/away dots are now live, refreshed
+  on a slow (60s) poll via `users.getPresence` (bounded + rate-limit-guarded);
+  no longer hardcoded to "online"
+- **Faster message pane** — the per-keystroke geometry recompute is now cached
+  (keyed by conversation/width/density/content generation), halving the
+  render work on every j/k as history grows
+- Read calls (history, thread replies) are now time-bounded, so a dropped
+  connection surfaces an error instead of an eternal "loading…"
+
 ## v0.3.0
 
 - **Workspace switching** — `slack-tui login` now saves each workspace under

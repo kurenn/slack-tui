@@ -30,6 +30,7 @@ var helpRows = []helpRow{
 	{"s", "search the workspace"},
 	{"T", "threads inbox"},
 	{"y", "yank message to clipboard"},
+	{"drag", "select text · copies on release"},
 	{"] / [", "next / prev unread"},
 	{"x", "hide · un-hide conversation"},
 	{"ctrl+k", "command palette"},

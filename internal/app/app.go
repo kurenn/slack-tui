@@ -181,6 +181,17 @@ type Model struct {
 		total  int
 	}
 	msgGen int // bumped whenever active-conversation layout could change
+
+	// mouse drag-to-select state
+	selecting bool // a left-drag selection is in progress
+	selActive bool // a selection is shown (persists after release until next key/click/scroll)
+	selAnchor cell // selection start in content coordinates
+	selHead   cell // selection end in content coordinates
+
+	copyToast  string // transient "copied" toast label ("" = hidden)
+	copyToastX int    // toast screen position (clamped in View)
+	copyToastY int
+	copySeq    int // generation counter for the auto-clearing copy toast
 }
 
 // New builds the production model from saved (or default) prefs. The data
@@ -639,6 +650,31 @@ func (m *Model) msgGeom() (ss, se, total, innerH int) {
 	return
 }
 
+// msgViewport returns the message pane's full rendered lines, the scroll offset
+// (top), and the inner pane dimensions. It is the single source of truth shared
+// by renderCenter (display) and the mouse hit-test helpers (cellAt, selectionText)
+// so they never drift.
+func (m Model) msgViewport() (lines []string, top, innerW, innerH int) {
+	centerW := m.width - sidebarWidth - 1
+	if m.threadOpen() {
+		centerW = m.width - sidebarWidth - threadWidth - 2
+	}
+	innerW = centerW - 2
+	innerH = (m.height - 2 - m.composerHeight()) - 2
+	msgs := m.curMsgs()
+	var starts []int
+	lines, starts = components.MessagesBody(m.pal, m.ws, msgs, m.msgSel, m.focus == focusMessages, m.density, innerW, m.newMark[m.activeID])
+	ss, se := 0, 0
+	if n := len(msgs); n > 0 {
+		mi := clamp(m.msgSel, 0, n-1)
+		ss, se = starts[mi], starts[mi+1]-1
+	}
+	if len(lines) > innerH {
+		top = clamp(windowBaseTop(ss, se, innerH, len(lines))+m.msgExtra, 0, len(lines)-innerH)
+	}
+	return
+}
+
 // scrollMessages line-scrolls the message pane by step (Ctrl-d/Ctrl-u), letting
 // you read through a message taller than the viewport. Other panes move selection.
 func (m *Model) scrollMessages(step int) {
@@ -844,6 +880,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.syncComposerSizes()
+		m.selecting, m.selActive = false, false // reflow invalidates layout-relative selection coords
 		return m, nil
 	case pollMsg:
 		return m, tea.Batch(pollTick(), m.refresh(), m.markReadCmd(m.activeID))
@@ -932,6 +969,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.loadErr = nil
 		}
 		return m, nil
+	case copyToastMsg:
+		if msg.seq == m.copySeq {
+			m.copyToast = ""
+		}
+		return m, nil
 	case eventMsg:
 		cmds := append(m.applyEvent(msg.ev), m.titleCmd())
 		if s, ok := m.src.(streamer); ok {
@@ -941,12 +983,61 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
+			m.selActive = false
 			m.scrollMessages(-msgScrollStep)
+			return m, nil
 		case tea.MouseButtonWheelDown:
+			m.selActive = false
 			m.scrollMessages(msgScrollStep)
+			return m, nil
+		}
+		// Left-drag text selection. Release is handled by Action regardless of
+		// button: terminals on X10 mouse encoding report release with
+		// MouseButtonNone, so gating release on the left button would drop it.
+		switch msg.Action {
+		case tea.MouseActionPress:
+			if msg.Button != tea.MouseButtonLeft {
+				return m, nil
+			}
+			m.selecting, m.selActive = false, false // a fresh click dismisses any prior selection
+			m.copyToast = ""
+			if c, ok := m.cellAt(msg.X, msg.Y); ok {
+				m.selAnchor, m.selHead = c, c
+				m.selecting, m.selActive = true, true
+			}
+			return m, nil
+		case tea.MouseActionMotion:
+			if m.selecting {
+				if c, ok := m.cellAt(msg.X, msg.Y); ok {
+					m.selHead = c
+				}
+			}
+			return m, nil
+		case tea.MouseActionRelease:
+			if m.selecting {
+				m.selecting = false
+				if c, ok := m.cellAt(msg.X, msg.Y); ok {
+					m.selHead = c // the release position is authoritative
+				}
+				text := m.selectionText()
+				m.selActive = false // unselect on release
+				if text != "" {
+					_ = clipboard.WriteAll(text)
+					m.copyToast = "copied"
+					m.copyToastX = msg.X
+					m.copyToastY = clamp(msg.Y+1, 0, m.height-2) // just below the release, above the status bar
+					m.copySeq++
+					return m, copyToastTick(m.copySeq)
+				}
+			}
+			return m, nil
 		}
 		return m, nil
 	case tea.KeyMsg:
+		// Any keystroke dismisses a lingering mouse selection.
+		if m.selActive {
+			m.selActive, m.selecting = false, false
+		}
 		// Ctrl-K toggles the palette from any mode (Cmd never reaches a terminal).
 		if msg.String() == "ctrl+k" {
 			if m.paletteOpen {
@@ -1286,6 +1377,11 @@ func (m *Model) jumpBottom() {
 }
 
 // ── async send reconciliation, error flash, notifications ──────────────────
+
+// copyToastTick auto-dismisses the copy toast after a short delay.
+func copyToastTick(seq int) tea.Cmd {
+	return tea.Tick(1200*time.Millisecond, func(time.Time) tea.Msg { return copyToastMsg{seq} })
+}
 
 // flash surfaces an error in the banner and schedules its auto-clear. Returns
 // nil for a nil error, so handlers can `return m, m.flash(msg.err)` directly.

@@ -342,6 +342,8 @@ type (
 	}
 	// clearErrMsg removes the error banner if no newer error replaced it.
 	clearErrMsg struct{ seq int }
+	// copyToastMsg clears the "copied" toast if no newer copy replaced it.
+	copyToastMsg struct{ seq int }
 )
 
 func pollTick() tea.Cmd {

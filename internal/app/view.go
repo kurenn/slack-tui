@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/kurenn/slack-tui/internal/data"
 	"github.com/kurenn/slack-tui/internal/ui/components"
@@ -64,6 +65,12 @@ func (m Model) View() string {
 			Width(m.width).Render(msg)
 		frame = overlay(frame, banner, 0, 1)
 	}
+	if m.copyToast != "" {
+		label := lipgloss.NewStyle().Foreground(m.pal.Bg).Background(m.pal.Accent).Bold(true).Render(" ✓ " + m.copyToast + " ")
+		tw := lipgloss.Width(label)
+		tx := clamp(m.copyToastX, 0, max(0, m.width-tw))
+		frame = overlay(frame, label, tx, m.copyToastY)
+	}
 	if m.paletteOpen {
 		frame = m.overlayPalette(frame)
 	}
@@ -115,7 +122,6 @@ func (m Model) overlayPalette(frame string) string {
 }
 
 func (m Model) renderCenter(conv data.Conversation, w, bodyH int) string {
-	innerW := w - 2
 	paneH := bodyH - m.composerHeight()
 	innerH := paneH - 2
 
@@ -124,18 +130,38 @@ func (m Model) renderCenter(conv data.Conversation, w, bodyH int) string {
 	if m.loading[m.activeID] && len(msgs) == 0 {
 		body = lipgloss.NewStyle().Foreground(m.pal.Dim).Render("  loading…")
 	} else {
-		lines, starts := components.MessagesBody(m.pal, m.ws, msgs, m.msgSel, m.focus == focusMessages, m.density, innerW, m.newMark[m.activeID])
-		ss, se := 0, 0
-		if n := len(msgs); n > 0 {
-			mi := clamp(m.msgSel, 0, n-1)
-			ss, se = starts[mi], starts[mi+1]-1
+		lines, top, _, _ := m.msgViewport()
+		// Work on a copy so we don't mutate the slice returned by msgViewport.
+		var visible []string
+		if len(lines) > innerH {
+			visible = append([]string(nil), lines[top:top+innerH]...)
+		} else {
+			visible = append([]string(nil), lines...)
 		}
-		if len(lines) <= innerH {
-			body = strings.Join(lines, "\n")
-		} else { // base scroll keeps the selection visible; msgExtra reads through tall messages
-			top := clamp(windowBaseTop(ss, se, innerH, len(lines))+m.msgExtra, 0, len(lines)-innerH)
-			body = strings.Join(lines[top:top+innerH], "\n")
+		// Paint the mouse-drag selection highlight.
+		if m.selActive {
+			a, b := orderCells(m.selAnchor, m.selHead)
+			for j := range visible {
+				L := top + j
+				if L < a.line || L > b.line {
+					continue
+				}
+				from, to := 0, lipgloss.Width(visible[j])
+				if L == a.line {
+					from = a.col
+				}
+				if L == b.line {
+					to = b.col
+				}
+				if to <= from {
+					continue
+				}
+				seg := ansi.Strip(ansi.TruncateLeft(ansi.Truncate(visible[j], to, ""), from, ""))
+				hl := lipgloss.NewStyle().Foreground(m.pal.Fg).Background(m.pal.SelBg).Render(seg)
+				visible[j] = spliceLine(visible[j], hl, from)
+			}
 		}
+		body = strings.Join(visible, "\n")
 	}
 
 	title := "#" + conv.Name

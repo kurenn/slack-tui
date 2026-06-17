@@ -20,13 +20,21 @@ type SideItem struct {
 
 // BuildSideItems flattens channels and DMs into the rendered list, applying live
 // unread/mention meta. meta maps conversation id → {unread, mention}.
-func BuildSideItems(ws *data.Workspace, meta map[string]Meta) []SideItem {
+// Conversations whose ID appears in hidden (value true) are omitted; section
+// headers are always included.
+func BuildSideItems(ws *data.Workspace, meta map[string]Meta, hidden map[string]bool) []SideItem {
 	items := []SideItem{{Header: true, Label: "── channels ──"}}
 	for _, c := range ws.Channels {
+		if hidden[c.ID] {
+			continue
+		}
 		items = append(items, SideItem{Conv: applyMeta(c, meta)})
 	}
 	items = append(items, SideItem{Header: true, Label: "── direct messages ──"})
 	for _, c := range ws.DMs {
+		if hidden[c.ID] {
+			continue
+		}
 		items = append(items, SideItem{Conv: applyMeta(c, meta)})
 	}
 	return items

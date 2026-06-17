@@ -31,6 +31,7 @@ var helpRows = []helpRow{
 	{"T", "threads inbox"},
 	{"y", "yank message to clipboard"},
 	{"] / [", "next / prev unread"},
+	{"x", "hide · un-hide conversation"},
 	{"ctrl+k", "command palette"},
 	{",", "settings"},
 	{"ctrl+r", "refresh"},

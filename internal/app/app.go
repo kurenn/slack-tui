@@ -109,6 +109,7 @@ type Model struct {
 	fullyLoaded map[string]bool // conversations with no more older history
 	loading     map[string]bool // conversations with an in-flight history fetch
 	meta        map[string]components.Meta
+	hidden      map[string]int // conv IDs hidden from the sidebar → unread baseline captured at hide time
 	myStatus    string
 
 	activeID     string
@@ -210,6 +211,9 @@ func New() Model {
 			m.drafts = st.Drafts
 		}
 		m.recent = st.Recent
+		if st.Hidden != nil {
+			m.hidden = st.Hidden
+		}
 		if d := m.drafts[m.activeID]; d != "" {
 			m.draft.SetValue(d)
 			m.syncComposerSizes()
@@ -238,19 +242,37 @@ func (m Model) Shutdown() {
 	}
 }
 
+// stateSnapshot builds the persisted session state (drafts sans empties, recency, hidden).
+func (m Model) stateSnapshot() config.State {
+	drafts := map[string]string{}
+	for k, v := range m.drafts {
+		if strings.TrimSpace(v) != "" {
+			drafts[k] = v
+		}
+	}
+	if v := m.draft.Value(); strings.TrimSpace(v) != "" && m.editingID == "" {
+		drafts[m.activeID] = v
+	}
+	hidden := make(map[string]int, len(m.hidden))
+	for k, v := range m.hidden {
+		hidden[k] = v
+	}
+	return config.State{Drafts: drafts, Recent: append([]string(nil), m.recent...), Hidden: hidden}
+}
+
+// persistStateCmd writes session state off the UI thread (no-op when not persisting, e.g. tests).
+func (m *Model) persistStateCmd() tea.Cmd {
+	if !m.persistState {
+		return nil
+	}
+	s := m.stateSnapshot()
+	return func() tea.Msg { _ = config.SaveState(s); return nil }
+}
+
 // quit persists session state and exits — every quit key path funnels here.
 func (m *Model) quit() tea.Cmd {
 	if m.persistState {
-		drafts := map[string]string{}
-		for k, v := range m.drafts {
-			if strings.TrimSpace(v) != "" {
-				drafts[k] = v
-			}
-		}
-		if v := m.draft.Value(); strings.TrimSpace(v) != "" && m.editingID == "" {
-			drafts[m.activeID] = v
-		}
-		_ = config.SaveState(config.State{Drafts: drafts, Recent: m.recent})
+		_ = config.SaveState(m.stateSnapshot())
 	}
 	return tea.Quit
 }
@@ -350,6 +372,7 @@ func NewWith(src source.Source, prefs config.Prefs) Model {
 		pendingSelect:   map[string]string{},
 		pendingThread:   map[string]string{},
 		seenReplies:     map[string]int{},
+		hidden:          map[string]int{},
 	}
 	m.ensureHistory(activeID)
 	m.sideSel = m.flatIndexOf(activeID)
@@ -384,7 +407,11 @@ func (m *Model) invalidateGeom() { m.msgGen++ }
 // ── derived helpers ─────────────────────────────────────────────────────────
 
 func (m Model) sideItems() []components.SideItem {
-	return components.BuildSideItems(m.ws, m.meta)
+	hidden := make(map[string]bool, len(m.hidden))
+	for id := range m.hidden {
+		hidden[id] = true
+	}
+	return components.BuildSideItems(m.ws, m.meta, hidden)
 }
 
 func (m Model) selectable() []int {
@@ -398,6 +425,35 @@ func (m Model) flatIndexOf(id string) int {
 		}
 	}
 	return 0
+}
+
+// toggleHide hides the conversation (snapshotting current unread as the resurface
+// baseline) or un-hides it if already hidden, keeps the sidebar cursor valid, and persists.
+func (m *Model) toggleHide(id string) tea.Cmd {
+	if id == "" {
+		return nil
+	}
+	if _, ok := m.hidden[id]; ok {
+		delete(m.hidden, id)
+	} else {
+		m.hidden[id] = m.meta[id].Unread // resurface baseline; ~30-unread cap from source.Unread means a maxed-out channel won't auto-resurface via poll — open or post to reset
+	}
+	// keep the sidebar cursor on a still-visible row: the hidden conversation
+	// may have been the selection, and flat indices shift when a row drops out.
+	if sel := m.selectable(); len(sel) == 0 {
+		m.sideSel = 0
+	} else {
+		ns := sel[0]
+		for _, i := range sel {
+			if i <= m.sideSel {
+				ns = i
+			} else {
+				break
+			}
+		}
+		m.sideSel = ns
+	}
+	return m.persistStateCmd()
 }
 
 func (m Model) threadOpen() bool { return m.threadRootID != "" }
@@ -455,6 +511,9 @@ func (m *Model) openChannel(id string) tea.Cmd {
 	m.touchRecent(id)
 	m.msgExtra = 0
 	m.meta[id] = components.Meta{Unread: 0, Mention: false}
+	if _, ok := m.hidden[id]; ok {
+		m.hidden[id] = 0 // reading resets the resurface baseline so a later message re-shows it
+	}
 	m.focus = focusMessages
 	m.sideSel = m.flatIndexOf(id)
 	m.threadRootID = ""
@@ -660,6 +719,9 @@ func (m *Model) jumpUnread(dir int) tea.Cmd {
 	}
 	for k := 1; k <= len(ids); k++ {
 		i := ((start+dir*k)%len(ids) + len(ids)) % len(ids)
+		if _, hid := m.hidden[ids[i]]; hid {
+			continue // hidden conversations are excluded from ] / [ navigation
+		}
 		if m.meta[ids[i]].Unread > 0 {
 			return m.openChannel(ids[i])
 		}
@@ -720,6 +782,7 @@ func (m *Model) sendMessage() tea.Cmd {
 	if text == "" {
 		return nil
 	}
+	delete(m.hidden, m.activeID)
 	m.pendingSeq++
 	pid := fmt.Sprintf("%s%d", pendingPrefix, m.pendingSeq)
 	m.messages[m.activeID] = append(m.messages[m.activeID],
@@ -743,6 +806,7 @@ func (m *Model) sendReply() tea.Cmd {
 	if text == "" || m.threadRootID == "" {
 		return nil
 	}
+	delete(m.hidden, m.activeID)
 	m.pendingSeq++
 	pid := fmt.Sprintf("%s%d", pendingPrefix, m.pendingSeq)
 	m.eachRootMsg(m.threadRootID, func(msg *data.Message) {
@@ -808,6 +872,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				mm.Mention = false
 			}
 			m.meta[id] = mm
+			if b, ok := m.hidden[id]; ok && n > b {
+				delete(m.hidden, id) // resurface: new messages since hide time
+			}
 		}
 		return m, m.titleCmd()
 	case presenceMsg:
@@ -1147,6 +1214,17 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.threadOpen() {
 			m.closeThread()
 		}
+
+	case "x": // hide / un-hide the conversation
+		target := m.activeID
+		if m.focus == focusSidebar {
+			items := m.sideItems()
+			if m.sideSel >= len(items) || items[m.sideSel].Header {
+				return m, nil // cursor isn't on a conversation row
+			}
+			target = items[m.sideSel].Conv.ID
+		}
+		return m, m.toggleHide(target)
 	}
 
 	// any non-g key cancels a pending gg (same for dd)
@@ -1163,6 +1241,9 @@ func (m *Model) moveSel(delta int) {
 	switch m.focus {
 	case focusSidebar:
 		sel := m.selectable()
+		if len(sel) == 0 {
+			return // everything hidden / empty workspace — nothing to move to
+		}
 		pos := indexOfInt(sel, m.sideSel)
 		pos = clamp(pos+delta, 0, len(sel)-1)
 		m.sideSel = sel[pos]

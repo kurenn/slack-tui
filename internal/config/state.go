@@ -2,11 +2,13 @@ package config
 
 import "encoding/json"
 
-// State is small session state that should survive restarts: unsent drafts
-// and the conversation-recency order behind the palette. Saved on quit.
+// State is small session state that should survive restarts: unsent drafts,
+// the conversation-recency order behind the palette, and the set of
+// conversations the user has hidden from the sidebar. Saved on quit.
 type State struct {
 	Drafts map[string]string `json:"drafts,omitempty"`
 	Recent []string          `json:"recent,omitempty"`
+	Hidden map[string]int    `json:"hidden,omitempty"` // conversation ID → unread count snapshotted at hide time (resurface baseline)
 }
 
 // LoadState reads the saved session state (zero value if none).

@@ -242,6 +242,7 @@ func (m *Model) applyInactiveEvent(ev source.Event) []tea.Cmd {
 	if ev.Msg.UserID == m.ws.MeID {
 		return nil // our own message from another client
 	}
+	delete(m.hidden, ev.ConvID) // a new message resurfaces a hidden conversation
 	meta := m.meta[ev.ConvID]
 	meta.Unread++
 	if ev.Msg.MentionsMe {

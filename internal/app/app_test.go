@@ -890,6 +890,115 @@ func TestQuitPersistsState(t *testing.T) {
 
 // TestWorkspaceSwitchFlow: the picker lists workspaces; picking another one
 // persists it and emits ReloadMsg for root.
+// TestHideRemovesFromSidebarNotPalette: hiding a channel removes it from the
+// sidebar (sideItems) but keeps it in the palette (paletteItems with id "ch:<id>").
+func TestHideRemovesFromSidebarNotPalette(t *testing.T) {
+	m := newSized()
+	id := "design" // visible channel in the mock
+
+	// Confirm it appears as a non-header item in sideItems before hiding.
+	inSide := func() bool {
+		for _, it := range m.sideItems() {
+			if !it.Header && it.Conv.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	if !inSide() {
+		t.Fatalf("%q should be a non-header item in sideItems before hide", id)
+	}
+
+	m.toggleHide(id)
+
+	if inSide() {
+		t.Errorf("%q should be absent from sideItems after toggleHide", id)
+	}
+
+	// Must still appear in paletteItems with id "ch:<id>".
+	wantPalID := "ch:" + id
+	inPal := false
+	for _, it := range m.paletteItems() {
+		if it.id == wantPalID {
+			inPal = true
+			break
+		}
+	}
+	if !inPal {
+		t.Errorf("%q should still be in paletteItems (id %q) after hide", id, wantPalID)
+	}
+}
+
+// TestUnreadUnhidesOnIncrease: a hidden conv stays hidden when the unread count
+// equals the baseline but is un-hidden when the count exceeds it.
+func TestUnreadUnhidesOnIncrease(t *testing.T) {
+	m := newSized()
+	// "incidents" has Unread:2 in the mock and is not the activeID ("engineering").
+	id := "incidents"
+	if m.activeID == id {
+		t.Fatalf("test requires %q to not be activeID", id)
+	}
+
+	baseline := m.meta[id].Unread // 2
+
+	m.toggleHide(id)
+
+	if got, ok := m.hidden[id]; !ok || got != baseline {
+		t.Fatalf("after hide, m.hidden[%q] = %d ok=%v; want %d", id, got, ok, baseline)
+	}
+
+	inSide := func(mm Model) bool {
+		for _, it := range mm.sideItems() {
+			if !it.Header && it.Conv.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	if inSide(m) {
+		t.Fatalf("%q should be absent from sideItems while hidden", id)
+	}
+
+	// Feed count == baseline: must stay hidden.
+	next, _ := m.Update(unreadMsg{counts: map[string]int{id: baseline}})
+	m = next.(Model)
+	if _, ok := m.hidden[id]; !ok {
+		t.Errorf("count == baseline should NOT un-hide %q", id)
+	}
+	if inSide(m) {
+		t.Errorf("%q should still be absent from sideItems when count == baseline", id)
+	}
+
+	// Feed count == baseline+1: must un-hide.
+	next, _ = m.Update(unreadMsg{counts: map[string]int{id: baseline + 1}})
+	m = next.(Model)
+	if _, ok := m.hidden[id]; ok {
+		t.Errorf("count > baseline should un-hide %q, but it remains in m.hidden", id)
+	}
+	if !inSide(m) {
+		t.Errorf("%q should be back in sideItems after un-hide", id)
+	}
+}
+
+// TestSendUnhidesActive: hiding the active channel and then sending a message
+// removes it from m.hidden.
+func TestSendUnhidesActive(t *testing.T) {
+	m := newSized()
+	id := m.activeID // "engineering"
+
+	m.toggleHide(id)
+	if _, ok := m.hidden[id]; !ok {
+		t.Fatalf("toggleHide should add %q to m.hidden", id)
+	}
+
+	m.draft.SetValue("hi")
+	m.sendMessage()
+
+	if _, ok := m.hidden[id]; ok {
+		t.Errorf("sendMessage should remove %q from m.hidden", id)
+	}
+}
+
 func TestWorkspaceSwitchFlow(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	_ = config.SaveWorkspace(config.Workspace{Name: "coba", TeamID: "T1", Tokens: config.Tokens{User: "u1"}})
@@ -919,5 +1028,107 @@ func TestWorkspaceSwitchFlow(t *testing.T) {
 	}
 	if tok, _ := config.LoadTokens(); tok.User != "u2" {
 		t.Errorf("LoadTokens should follow the switch, got %+v", tok)
+	}
+}
+
+func TestHideKeepsSideSelValid(t *testing.T) {
+	m := newSized()
+	sel := m.selectable()
+	m.sideSel = sel[len(sel)-1] // select the last sidebar row
+	id := m.sideItems()[m.sideSel].Conv.ID
+	m.toggleHide(id)
+	items := m.sideItems()
+	if m.sideSel >= len(items) {
+		t.Fatalf("sideSel %d out of range after hide (len %d)", m.sideSel, len(items))
+	}
+	if items[m.sideSel].Header {
+		t.Fatalf("sideSel landed on a header after hide")
+	}
+}
+
+// TestAllHiddenNoMoveSelPanic: when every selectable conversation is hidden,
+// moveSel must not panic (no index into empty slice).
+func TestAllHiddenNoMoveSelPanic(t *testing.T) {
+	m := newSized()
+	// Snapshot the conv IDs from the current sideItems before any mutations.
+	var convIDs []string
+	for _, it := range m.sideItems() {
+		if !it.Header {
+			convIDs = append(convIDs, it.Conv.ID)
+		}
+	}
+	for _, id := range convIDs {
+		m.toggleHide(id)
+	}
+	m.focus = focusSidebar
+	// Both calls must not panic.
+	m.moveSel(1)
+	m.moveSel(-1)
+	// Optionally assert sideSel was not mutated to something illegal.
+	if m.sideSel != 0 {
+		// sideSel == 0 is the only safe sentinel when everything is hidden.
+		// toggleHide clamps it, but moveSel must not corrupt it further.
+		_ = m.sideSel // not strictly required to be 0 per spec; just no panic
+	}
+}
+
+// TestJumpUnreadSkipsHidden: ] must not jump into a hidden conversation even if
+// it has unread messages.
+func TestJumpUnreadSkipsHidden(t *testing.T) {
+	m := newSized()
+	// Start on a read channel so there's somewhere to jump from.
+	m.openChannel("general")
+	if m.activeID != "general" {
+		t.Fatalf("expected activeID=general, got %q", m.activeID)
+	}
+	// Hide every channel that carries unread.
+	for id, meta := range m.meta {
+		if meta.Unread > 0 {
+			m.toggleHide(id)
+		}
+	}
+	m.jumpUnread(1)
+	// With all unread convs hidden the jump should be a no-op.
+	if m.activeID != "general" {
+		t.Errorf("] jumped into hidden unread conv %q; want activeID=general", m.activeID)
+	}
+}
+
+// TestOpenHiddenResetsBaseline: opening a hidden conversation resets its
+// resurface baseline to 0 so a subsequent message will re-surface it.
+func TestOpenHiddenResetsBaseline(t *testing.T) {
+	m := newSized()
+	// "incidents" has Unread:2 in the mock.
+	m.toggleHide("incidents")
+	if got, ok := m.hidden["incidents"]; !ok || got != 2 {
+		t.Fatalf("after hide, m.hidden[\"incidents\"] = %d ok=%v; want 2", got, ok)
+	}
+	m.openChannel("incidents")
+	// Must still be in m.hidden (not removed), but baseline reset to 0.
+	got, ok := m.hidden["incidents"]
+	if !ok {
+		t.Fatal("openChannel should not remove a hidden conv from m.hidden; baseline reset expected")
+	}
+	if got != 0 {
+		t.Errorf("baseline after open = %d, want 0", got)
+	}
+}
+
+// TestStateSnapshotCopiesHidden: stateSnapshot must deep-copy m.hidden so that
+// subsequent mutations to the live map do not affect the snapshot (data-race
+// safety for the async persist goroutine).
+func TestStateSnapshotCopiesHidden(t *testing.T) {
+	m := newSized()
+	m.toggleHide("design")
+	s := m.stateSnapshot()
+	// Mutate the live map after the snapshot.
+	m.hidden["engineering"] = 9
+	delete(m.hidden, "design")
+	// The snapshot must be independent.
+	if _, ok := s.Hidden["design"]; !ok {
+		t.Error("snapshot should still contain \"design\" after live map delete")
+	}
+	if _, ok := s.Hidden["engineering"]; ok {
+		t.Error("snapshot should not contain \"engineering\" added after snapshot")
 	}
 }

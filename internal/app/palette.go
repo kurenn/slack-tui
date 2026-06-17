@@ -59,6 +59,13 @@ func (m Model) paletteItems() []palItem {
 		palItem{"cmd:dnd", components.PaletteItem{Icon: "◓", Label: "Set status: do not disturb", Hint: "presence", Kind: "cmd"}},
 		palItem{"cmd:read", components.PaletteItem{Icon: "✓", Label: "Mark all as read", Hint: "inbox", Kind: "cmd"}},
 	)
+	hideLabel := "Hide this conversation"
+	if _, ok := m.hidden[m.activeID]; ok {
+		hideLabel = "Un-hide this conversation"
+	}
+	items = append(items,
+		palItem{"cmd:hide", components.PaletteItem{Icon: "⊘", Label: hideLabel, Hint: "sidebar", Kind: "cmd"}},
+	)
 	return items
 }
 
@@ -170,8 +177,13 @@ func (m *Model) runPalette(id string) tea.Cmd {
 				unread = append(unread, k)
 			}
 			m.meta[k] = components.Meta{Unread: 0, Mention: false}
+			if _, ok := m.hidden[k]; ok {
+				m.hidden[k] = 0 // marking read resets the resurface baseline
+			}
 		}
 		return tea.Batch(m.markAllReadCmd(unread), m.titleCmd())
+	case id == "cmd:hide":
+		return m.toggleHide(m.activeID)
 	}
 	return nil
 }

@@ -121,9 +121,9 @@ func sideRow(p theme.Palette, ws *data.Workspace, c data.Conversation, cursor, a
 	case cursor:
 		leftMargin = lipgloss.NewStyle().Foreground(p.Accent).Render("▌")
 	case c.Mention:
-		leftMargin = lipgloss.NewStyle().Foreground(p.Orange).Render("•")
+		leftMargin = lipgloss.NewStyle().Foreground(p.Orange).Bold(true).Render("●")
 	case unread:
-		leftMargin = lipgloss.NewStyle().Foreground(p.Accent).Render("•")
+		leftMargin = lipgloss.NewStyle().Foreground(p.Accent).Bold(true).Render("●")
 	}
 	if active || cursor {
 		content = theme.FillBg(content, region, p.SelBg)

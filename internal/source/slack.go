@@ -34,11 +34,29 @@ type Slack struct {
 	events     chan Event           // Socket Mode stream (nil until StartSocket)
 	stopSocket context.CancelFunc   // tears down the socket (workspace switch)
 	groupDMs   bool                 // include mpims in Load
+
+	mu       sync.Mutex          // guards lastRead
+	lastRead map[string]readMark // convID → cached read marker (see lastReadOf)
 }
 
-// NewSlack builds a Slack source from a user OAuth token (xoxp-…).
+// readMark caches a conversation's server-side last_read timestamp so repeat
+// unread polls don't re-fetch it every round. seen is when we last refreshed it.
+type readMark struct {
+	ts   string
+	seen time.Time
+}
+
+// lastReadTTL bounds how stale a cached read marker may get. The marker changes
+// only when someone reads the conversation; we update it locally on MarkRead, so
+// the only drift is a read in another Slack client, corrected within the TTL.
+const lastReadTTL = 5 * time.Minute
+
+// NewSlack builds a Slack source from a user OAuth token (xoxp-…). OptionRetry
+// lets slack-go auto-retry rate-limited (429) calls, honoring Retry-After —
+// unread detection fans out a couple of calls per channel, so bursts are
+// expected and we'd rather wait than drop counts.
 func NewSlack(userToken string) *Slack {
-	return &Slack{api: slack.New(userToken), users: map[string]data.User{}, handleIDs: map[string]string{}}
+	return &Slack{api: slack.New(userToken, slack.OptionRetry(3)), users: map[string]data.User{}, handleIDs: map[string]string{}, lastRead: map[string]readMark{}}
 }
 
 // SetGroupDMs toggles whether Load includes group DMs (mpims). Takes effect on
@@ -111,8 +129,9 @@ func (s *Slack) Load() (*data.Workspace, error) {
 	}
 	sort.Slice(channels, func(i, j int) bool { return channels[i].Name < channels[j].Name })
 	sort.Slice(dms, func(i, j int) bool { return dms[i].Name < dms[j].Name })
-	s.fillUnread(channels)
-	s.fillUnread(dms)
+	// Unread counts are filled asynchronously after the UI is up (app.Init fires
+	// an immediate unread fetch) so Load stays fast — deriving unread costs a
+	// couple of calls per conversation (see Unread).
 
 	// Index handles for outgoing-mention encoding (@handle → <@ID>).
 	s.handleIDs = make(map[string]string, len(users))
@@ -182,21 +201,94 @@ func (s *Slack) resolveDMNames(dms []data.Conversation, users map[string]data.Us
 	wg.Wait()
 }
 
-// Unread returns a conversation's unread message count.
+// Unread returns a conversation's unread message count. conversations.info no
+// longer populates unread_count_display for OAuth user tokens (it's always 0),
+// so we derive the count: read the server-side last_read marker, then count the
+// messages after it that aren't ours or join/leave noise. Bounded to one page —
+// a sidebar dot doesn't need an exact number past "lots".
 func (s *Slack) Unread(convID string) (int, error) {
-	ci, err := s.api.GetConversationInfo(&slack.GetConversationInfoInput{ChannelID: convID})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return s.unreadFor(ctx, convID)
+}
+
+func (s *Slack) unreadFor(ctx context.Context, convID string) (int, error) {
+	lastRead, err := s.lastReadOf(ctx, convID)
 	if err != nil {
 		return 0, err
 	}
-	return ci.UnreadCountDisplay, nil
+	if lastRead == "" {
+		return 0, nil // no read marker (never opened) — treat as read, not a wall of dots
+	}
+	h, err := s.api.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{
+		ChannelID: convID, Oldest: lastRead, Inclusive: false, Limit: 30,
+	})
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, m := range h.Messages {
+		if m.User == s.meID || noiseSubtype(m.SubType) {
+			continue
+		}
+		n++
+	}
+	return n, nil
 }
 
-// MarkRead marks a conversation read up to ts on Slack.
+// lastReadOf returns a conversation's read marker, served from cache and
+// refreshed via conversations.info only when missing or past the TTL. This keeps
+// steady-state unread polling to a single call per conversation (the history
+// fetch) instead of two. On a refresh error a stale-but-cached marker is used so
+// one rate-limited info call doesn't blank the whole sidebar.
+func (s *Slack) lastReadOf(ctx context.Context, convID string) (string, error) {
+	s.mu.Lock()
+	m, ok := s.lastRead[convID]
+	s.mu.Unlock()
+	if ok && time.Since(m.seen) < lastReadTTL {
+		return m.ts, nil
+	}
+	ci, err := s.api.GetConversationInfoContext(ctx, &slack.GetConversationInfoInput{ChannelID: convID})
+	if err != nil {
+		if ok {
+			return m.ts, nil
+		}
+		return "", err
+	}
+	s.setLastRead(convID, ci.LastRead)
+	return ci.LastRead, nil
+}
+
+func (s *Slack) setLastRead(convID, ts string) {
+	s.mu.Lock()
+	s.lastRead[convID] = readMark{ts: ts, seen: time.Now()}
+	s.mu.Unlock()
+}
+
+// noiseSubtype reports whether a message subtype is membership/system noise that
+// Slack itself excludes from unread badges (joins, leaves, topic/name edits, …).
+func noiseSubtype(st string) bool {
+	switch st {
+	case "channel_join", "channel_leave", "channel_topic", "channel_purpose",
+		"channel_name", "channel_archive", "channel_unarchive",
+		"group_join", "group_leave":
+		return true
+	}
+	return false
+}
+
+// MarkRead marks a conversation read up to ts on Slack and updates the cached
+// read marker, so the next unread poll sees zero immediately instead of
+// re-flagging the conversation until the marker's TTL refresh.
 func (s *Slack) MarkRead(convID, ts string) error {
 	if ts == "" {
 		return nil
 	}
-	return s.api.MarkConversation(convID, ts)
+	if err := s.api.MarkConversation(convID, ts); err != nil {
+		return err
+	}
+	s.setLastRead(convID, ts)
+	return nil
 }
 
 // SetPresence updates presence/DND on Slack. Active/Away map to users.setPresence
@@ -266,43 +358,6 @@ func (s *Slack) Presence(userIDs []string) (map[string]string, error) {
 	}
 	wg.Wait()
 	return out, nil
-}
-
-// fillUnread populates each conversation's unread count via conversations.info,
-// concurrently and bounded, with an overall timeout so startup can't hang. A
-// rate-limit error stops the remaining lookups (they'd all fail the same way).
-func (s *Slack) fillUnread(convs []data.Conversation) {
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
-	defer cancel()
-	sem := make(chan struct{}, 16)
-	var wg sync.WaitGroup
-	var limited atomic.Bool
-	for i := range convs {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			select {
-			case sem <- struct{}{}:
-				defer func() { <-sem }()
-			case <-ctx.Done():
-				return
-			}
-			if limited.Load() {
-				return
-			}
-			ci, err := s.api.GetConversationInfoContext(ctx, &slack.GetConversationInfoInput{ChannelID: convs[i].ID})
-			if err != nil {
-				if IsRateLimited(err) {
-					limited.Store(true)
-				}
-				return
-			}
-			if ci.UnreadCountDisplay > 0 {
-				convs[i].Unread = ci.UnreadCountDisplay
-			}
-		}(i)
-	}
-	wg.Wait()
 }
 
 // readTimeout bounds a single read call. slack-go's default client has no

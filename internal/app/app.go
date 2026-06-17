@@ -368,6 +368,9 @@ func (m Model) Init() tea.Cmd {
 		cmds = append(cmds, dmPollTick())       // periodic DM unread (Socket Mode can't see DMs)
 		cmds = append(cmds, presencePollTick()) // periodic presence refresh for DM partners
 		cmds = append(cmds, m.presenceCmd())    // immediate first fetch so dots are right at startup
+		// Immediate unread fetch so sidebar dots appear right after launch
+		// instead of waiting for the first poll tick (Load no longer blocks on it).
+		cmds = append(cmds, m.unreadCmd(m.chanIDs()), m.unreadCmd(m.dmIDs()))
 	}
 	return tea.Batch(cmds...)
 }

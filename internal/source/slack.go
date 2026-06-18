@@ -866,7 +866,13 @@ func mpimName(raw string) string {
 
 var refRe = regexp.MustCompile(`<([@#])([A-Z0-9]+)(\|[^>]+)?>|<(https?://[^|>]+)(\|[^>]+)?>`)
 
-// renderText converts Slack mrkdwn refs into our @name / #name / url forms.
+// emojiShortRe matches Slack emoji shortcodes (:name:) in message text. Names
+// are lowercase alphanumerics with _ + -; digit-only segments in timestamps
+// (:30:, :59:) aren't emoji names, so emojiOf passes them through unchanged.
+var emojiShortRe = regexp.MustCompile(`:([a-z0-9_+-]+):`)
+
+// renderText converts Slack mrkdwn refs into our @name / #name / url forms and
+// renders :emoji: shortcodes to their glyphs (unknown names stay literal).
 func (s *Slack) renderText(text string) string {
 	text = refRe.ReplaceAllStringFunc(text, func(m string) string {
 		g := refRe.FindStringSubmatch(m)
@@ -882,7 +888,10 @@ func (s *Slack) renderText(text string) string {
 			return g[4]
 		}
 	})
-	return strings.NewReplacer("&amp;", "&", "&lt;", "<", "&gt;", ">").Replace(text)
+	text = strings.NewReplacer("&amp;", "&", "&lt;", "<", "&gt;", ">").Replace(text)
+	return emojiShortRe.ReplaceAllStringFunc(text, func(m string) string {
+		return emojiOf(m[1 : len(m)-1]) // emojiOf returns :name: for unknown
+	})
 }
 
 func nameOf(users map[string]data.User, id string) string {

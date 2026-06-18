@@ -216,3 +216,19 @@ func TestGemojiFallback(t *testing.T) {
 		t.Errorf("EmojiNames should include the full gemoji set, got %d", n)
 	}
 }
+
+func TestRenderTextEmojiShortcodes(t *testing.T) {
+	s := &Slack{}
+	cases := []struct{ in, want string }{
+		{":warning: alert", emojiOf("warning") + " alert"},
+		{"done :white_check_mark:", "done " + emojiOf("white_check_mark")},
+		{"no :notarealemoji: here", "no :notarealemoji: here"},   // unknown stays literal
+		{"window 12:30:00 – 13:59:59", "window 12:30:00 – 13:59:59"}, // times untouched
+		{":tada::tada:", emojiOf("tada") + emojiOf("tada")},
+	}
+	for _, c := range cases {
+		if got := s.renderText(c.in); got != c.want {
+			t.Errorf("renderText(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

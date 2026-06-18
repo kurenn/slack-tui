@@ -3,6 +3,25 @@
 slack-tui follows semver-ish tags; every release ships binaries for
 macOS/Linux/Windows plus a Homebrew formula via goreleaser.
 
+## v0.5.0
+
+- **Unread, for real** — per-conversation unread is now derived from the
+  server-side `last_read` marker vs. recent history (`conversations.info`'s
+  `unread_count_display` is dead for OAuth tokens), so the sidebar finally shows
+  accurate unread. Unread rows get a brighter filled dot (orange for mentions).
+- **Hide channels & DMs** — `x` hides a noisy conversation from the sidebar
+  (local, reversible; still findable via search/`Ctrl-K`). It auto-resurfaces on
+  any new message; un-hide from the palette.
+- **Mouse text-selection** — drag to select text in the message pane; the exact
+  substring is copied to the clipboard on release, with a `✓ copied` toast.
+- **Attach/upload files** — drag a file onto the message pane (or press `A` to
+  type a path) to stage it, then send it to the active conversation with an
+  optional comment. Multiple files post as one message. (Needs `files:write`.)
+- **Download files** — `S` saves the selected message's file(s) to `~/Downloads`
+  (collision- and symlink-safe). (Needs `files:read`.)
+- **Thread pane** — bigger by default, **mouse-draggable divider** to resize
+  (persisted), mouse text-selection inside threads, and `y` to yank a reply.
+
 ## v0.4.0
 
 - **Real presence** — DM partners' online/away dots are now live, refreshed

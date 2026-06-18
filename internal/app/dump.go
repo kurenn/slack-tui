@@ -6,12 +6,14 @@ import tea "github.com/charmbracelet/bubbletea"
 // and tests for headless verification.
 func Dump(m Model, w, h int) string {
 	m.width, m.height = w, h
+	m.syncComposerSizes()
 	return m.View()
 }
 
 // WithSize returns a copy of the model sized to w×h (test helper).
 func WithSize(m Model, w, h int) Model {
 	m.width, m.height = w, h
+	m.threadWidth = m.clampThreadWidth(m.threadWidth)
 	m.syncComposerSizes()
 	return m
 }

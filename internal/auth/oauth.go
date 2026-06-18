@@ -35,7 +35,7 @@ var (
 	UserScopes = []string{
 		"channels:history", "channels:read", "channels:write", "groups:history",
 		"groups:read", "im:history", "im:read", "mpim:history", "mpim:read",
-		"users:read", "chat:write", "files:write", "reactions:read", "reactions:write",
+		"users:read", "chat:write", "files:read", "files:write", "reactions:read", "reactions:write",
 		"users:write", "dnd:write", "users.profile:write", "search:read",
 	}
 	BotScopes = []string{

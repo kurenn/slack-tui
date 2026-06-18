@@ -27,6 +27,7 @@
         "mpim:read",
         "users:read",
         "chat:write",
+        "files:read",
         "files:write",
         "reactions:read",
         "reactions:write",

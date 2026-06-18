@@ -62,6 +62,22 @@ func (m Model) selectedMsg() (data.Message, bool) {
 	return msgs[m.msgSel], true
 }
 
+// selectedReply returns the thread reply under the cursor when the thread
+// pane is focused.
+func (m Model) selectedReply() (data.Reply, bool) {
+	if m.focus != focusThread {
+		return data.Reply{}, false
+	}
+	root, ok := m.threadRoot()
+	if !ok {
+		return data.Reply{}, false
+	}
+	if m.threadSel < 0 || m.threadSel >= len(root.Replies) {
+		return data.Reply{}, false
+	}
+	return root.Replies[m.threadSel], true
+}
+
 func isPending(id string) bool { return strings.HasPrefix(id, pendingPrefix) }
 
 // ── reactions ───────────────────────────────────────────────────────────────

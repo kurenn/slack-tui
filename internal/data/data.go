@@ -25,6 +25,15 @@ type Conversation struct {
 	Mention bool
 }
 
+// File is a Slack-hosted attachment on a message (uploaded file or snippet).
+type File struct {
+	ID   string
+	Name string
+	URL  string // url_private_download (or url_private as fallback)
+	Size int
+	Mime string // mimetype reported by Slack (e.g. "image/png")
+}
+
 // Reply is a single threaded reply under a root message.
 type Reply struct {
 	ID     string
@@ -39,6 +48,7 @@ type Reply struct {
 // Extra holds non-text annotations ([file: …]) rendered after the body — kept
 // out of Text so editing a message never sends placeholders to the backend.
 // Links holds file/attachment permalinks for the `o` open-link action.
+// Files holds structured metadata for attached files (download support).
 type Message struct {
 	ID         string
 	UserID     string
@@ -47,6 +57,7 @@ type Message struct {
 	Text       string
 	Extra      []string
 	Links      []string
+	Files      []File
 	Reactions  []Reaction
 	Replies    []Reply
 	ReplyCount int
@@ -138,7 +149,7 @@ func Mock() *Workspace {
 			{ID: "e5", UserID: "lin", Time: "09:38", Text: "hey @you — can you take the keyboard-focus ticket? it pairs well with the work you did on modes.", MentionsMe: true},
 		},
 		"design": {
-			{ID: "d1", UserID: "priya", Time: "11:02", Text: "new spec for the pane borders — single-line box drawing, title embedded in the top rule. mock attached.", Reactions: []Reaction{{"👏", 3}}},
+			{ID: "d1", UserID: "priya", Time: "11:02", Text: "new spec for the pane borders — single-line box drawing, title embedded in the top rule. mock attached.", Reactions: []Reaction{{"👏", 3}}, Files: []File{{ID: "F1", Name: "spec.pdf", URL: "https://files.slack.com/files-pri/T0/spec.pdf", Size: 24576}}},
 			{ID: "d2", UserID: "priya", Time: "11:03", Text: "token palette stays multi-color: usernames, #channels, @mentions and `code` each get a distinct hue. it should read like a good editor theme.", Reactions: []Reaction{{"🎨", 4}}},
 			{ID: "d3", UserID: "tomo", Time: "11:20", Text: "agreed on the embedded titles. one ask: keep the active pane border in the accent so focus is obvious at a glance."},
 		},

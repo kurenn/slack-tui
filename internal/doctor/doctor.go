@@ -28,6 +28,7 @@ var featureFor = map[string]string{
 	"dnd:write":           "Do Not Disturb",
 	"users.profile:write": "status text",
 	"chat:write":          "sending messages",
+	"files:read":          "downloading files",
 	"files:write":         "attaching files",
 }
 

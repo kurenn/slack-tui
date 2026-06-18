@@ -20,19 +20,21 @@ type Prefs struct {
 	Status    string `json:"status"`
 	GroupDMs  bool   `json:"group_dms"` // include group DMs (mpims) in the sidebar
 	Onboarded bool   `json:"onboarded"`
-	TS        int64  `json:"ts"`
+	TS          int64 `json:"ts"`
+	ThreadWidth int   `json:"thread_width,omitempty"`
 }
 
 // Defaults mirrors the app's TWEAK_DEFAULTS for a first run with no saved prefs.
 func Defaults() Prefs {
 	return Prefs{
-		Handle:    "you",
-		Theme:     "charcoal",
-		Accent:    "auto",
-		Font:      "JetBrains Mono",
-		Density:   "comfortable",
-		Status:    "online",
-		Onboarded: false,
+		Handle:      "you",
+		Theme:       "charcoal",
+		Accent:      "auto",
+		Font:        "JetBrains Mono",
+		Density:     "comfortable",
+		Status:      "online",
+		Onboarded:   false,
+		ThreadWidth: 60,
 	}
 }
 
@@ -145,4 +147,7 @@ func merge(dst *Prefs, src Prefs) {
 	dst.GroupDMs = src.GroupDMs
 	dst.Onboarded = src.Onboarded
 	dst.TS = src.TS
+	if src.ThreadWidth > 0 {
+		dst.ThreadWidth = src.ThreadWidth
+	}
 }

@@ -21,7 +21,7 @@ func (m Model) View() string {
 
 	centerW := m.width - sidebarWidth - 1
 	if threadOpen {
-		centerW = m.width - sidebarWidth - threadWidth - 2
+		centerW = m.width - sidebarWidth - m.threadWidth - 2
 	}
 	if m.width < 50 || bodyH < 8 || centerW < 24 {
 		return lipgloss.NewStyle().Foreground(m.pal.Dim).
@@ -49,7 +49,7 @@ func (m Model) View() string {
 	// ── assemble workspace row ──
 	cols := []string{sidebar, m.gap(bodyH), center}
 	if threadOpen {
-		cols = append(cols, m.gap(bodyH), m.renderThread(conv, bodyH))
+		cols = append(cols, m.dividerCol(bodyH), m.renderThread(conv, bodyH))
 	}
 	workspace := lipgloss.JoinHorizontal(lipgloss.Top, cols...)
 
@@ -142,28 +142,11 @@ func (m Model) renderCenter(conv data.Conversation, w, bodyH int) string {
 		} else {
 			visible = append([]string(nil), lines...)
 		}
-		// Paint the mouse-drag selection highlight.
-		if m.selActive {
+		// Paint the mouse-drag selection highlight (message pane only).
+		if m.selActive && m.selPane == focusMessages {
 			a, b := orderCells(m.selAnchor, m.selHead)
-			for j := range visible {
-				L := top + j
-				if L < a.line || L > b.line {
-					continue
-				}
-				from, to := 0, lipgloss.Width(visible[j])
-				if L == a.line {
-					from = a.col
-				}
-				if L == b.line {
-					to = b.col
-				}
-				if to <= from {
-					continue
-				}
-				seg := ansi.Strip(ansi.TruncateLeft(ansi.Truncate(visible[j], to, ""), from, ""))
-				hl := lipgloss.NewStyle().Foreground(m.pal.Fg).Background(m.pal.SelBg).Render(seg)
-				visible[j] = spliceLine(visible[j], hl, from)
-			}
+			visible = highlightVisible(visible, top, a, b,
+				lipgloss.NewStyle().Foreground(m.pal.Fg).Background(m.pal.SelBg))
 		}
 		body = strings.Join(visible, "\n")
 	}
@@ -216,24 +199,29 @@ func (m Model) renderCenter(conv data.Conversation, w, bodyH int) string {
 }
 
 func (m Model) renderThread(conv data.Conversation, bodyH int) string {
-	innerW := threadWidth - 2
 	innerH := bodyH - 2
 	scrollH := innerH - m.threadComposerHeight()
 
-	root, ok := m.threadRoot()
-	if !ok {
-		return pane.Render(m.pal, pane.Options{Title: "thread", Width: threadWidth, Height: bodyH})
+	if _, ok := m.threadRoot(); !ok {
+		return pane.Render(m.pal, pane.Options{Title: "thread", Width: m.threadWidth, Height: bodyH})
 	}
 
-	lines, starts := components.ThreadScroll(m.pal, m.ws, root, m.threadSel, m.focus == focusThread, innerW)
-	ss, se := 0, 0
-	if r := len(root.Replies); r > 0 {
-		ti := clamp(m.threadSel, 0, r-1)
-		ss, se = starts[ti], starts[ti+1]-1
+	lines, top, _, _, _ := m.threadViewport()
+	var visible []string
+	if len(lines) > scrollH {
+		visible = append([]string(nil), lines[top:top+scrollH]...)
+	} else {
+		visible = append([]string(nil), lines...)
 	}
-	windowed := windowLines(lines, ss, se, scrollH)
-	for len(windowed) < scrollH {
-		windowed = append(windowed, "")
+	// Paint the mouse-drag selection highlight (thread pane only).
+	if m.selActive && m.selPane == focusThread {
+		a, b := orderCells(m.selAnchor, m.selHead)
+		visible = highlightVisible(visible, top, a, b,
+			lipgloss.NewStyle().Foreground(m.pal.Fg).Background(m.pal.SelBg))
+	}
+	// Pad to fill scrollH so the composer always sits at a fixed position.
+	for len(visible) < scrollH {
+		visible = append(visible, "")
 	}
 
 	insertHere := m.insert && m.focus == focusThread
@@ -242,12 +230,12 @@ func (m Model) renderThread(conv data.Conversation, bodyH int) string {
 		prompt = "❯"
 	}
 	m.threadDraft.Placeholder = "reply in thread"
-	composer := components.Composer(m.pal, prompt, m.threadDraft.View(), insertHere, innerW)
+	composer := components.Composer(m.pal, prompt, m.threadDraft.View(), insertHere, m.threadWidth-2)
 
-	body := strings.Join(windowed, "\n") + "\n" + composer
+	body := strings.Join(visible, "\n") + "\n" + composer
 	return pane.Render(m.pal, pane.Options{
 		Title: "thread", Right: "#" + conv.Name, Focused: m.focus == focusThread,
-		Width: threadWidth, Height: bodyH, Body: body,
+		Width: m.threadWidth, Height: bodyH, Body: body,
 	})
 }
 
@@ -256,6 +244,15 @@ func (m Model) locName(conv data.Conversation) string {
 		return "@" + conv.Name
 	}
 	return "#" + conv.Name
+}
+
+// dividerCol renders a single-column dim vertical rule of the given height.
+// Used as the center↔thread gap to make the resizable boundary discoverable.
+func (m Model) dividerCol(height int) string {
+	col := strings.Repeat("┊\n", height)
+	col = strings.TrimSuffix(col, "\n")
+	return lipgloss.NewStyle().Width(1).Height(height).
+		Foreground(m.pal.Border).Background(m.pal.Bg).Render(col)
 }
 
 func (m Model) hints() []components.Hint {

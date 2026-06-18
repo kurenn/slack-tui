@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -621,6 +622,11 @@ func (s *Slack) toMessage(m slack.Message) data.Message {
 		if f.Permalink != "" {
 			msg.Links = append(msg.Links, f.Permalink)
 		}
+		url := f.URLPrivateDownload
+		if url == "" {
+			url = f.URLPrivate
+		}
+		msg.Files = append(msg.Files, data.File{ID: f.ID, Name: name, URL: url, Size: f.Size, Mime: f.Mimetype})
 	}
 	for _, a := range m.Attachments {
 		label := a.Title
@@ -746,6 +752,83 @@ func (s *Slack) Upload(convID string, paths []string, comment string) error {
 		return fmt.Errorf("complete upload: %w", err)
 	}
 	return nil
+}
+
+// sanitizeName strips directory traversal components from a file name so
+// Download cannot write outside destDir.
+func sanitizeName(name string) string {
+	name = filepath.Base(name)
+	if name == "" || name == "." || name == ".." || name == string(filepath.Separator) {
+		name = "file"
+	}
+	return name
+}
+
+// createUnique atomically creates a new file in dir based on name, appending
+// " (N)" before the extension on collisions. O_EXCL means it never follows or
+// clobbers an existing file or symlink (no TOCTOU), and it bails on real errors
+// (permission, name-too-long) instead of spinning.
+func createUnique(dir, name string) (*os.File, string, error) {
+	base := sanitizeName(name)
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	for i := 0; i < 1000; i++ {
+		cand := filepath.Join(dir, base)
+		if i > 0 {
+			cand = filepath.Join(dir, fmt.Sprintf("%s (%d)%s", stem, i, ext))
+		}
+		f, err := os.OpenFile(cand, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			return f, cand, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return nil, "", err // permission/name-too-long/etc. — don't loop forever
+		}
+	}
+	return nil, "", fmt.Errorf("too many files named %q", base)
+}
+
+// Download saves a Slack-hosted file to destDir (created if missing). It uses
+// GetFileContext so the request carries the user's OAuth token, allowing access
+// to url_private_download URLs that would 302 without auth.
+func (s *Slack) Download(file data.File, destDir string) (string, error) {
+	if file.URL == "" {
+		return "", fmt.Errorf("download %s: no download url", file.Name)
+	}
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return "", err
+	}
+	f, dest, err := createUnique(destDir, file.Name)
+	if err != nil {
+		return "", fmt.Errorf("download %s: %w", file.Name, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	derr := s.api.GetFileContext(ctx, file.URL, f)
+	cerr := f.Close() // close before remove (correct on all OSes); surfaces flush errors
+	if derr != nil {
+		os.Remove(dest)
+		return "", fmt.Errorf("download %s: %w", file.Name, derr)
+	}
+	if cerr != nil {
+		os.Remove(dest)
+		return "", fmt.Errorf("download %s: %w", file.Name, cerr)
+	}
+	// Guard: a token lacking files:read gets a sign-in HTML page instead of the
+	// file. Detect that (binary file whose first bytes sniff as HTML) and fail
+	// loudly rather than leaving a corrupt file on disk.
+	if !strings.HasPrefix(file.Mime, "text/html") {
+		if hf, err := os.Open(dest); err == nil {
+			head := make([]byte, 512)
+			n, _ := hf.Read(head)
+			hf.Close()
+			if strings.HasPrefix(http.DetectContentType(head[:n]), "text/html") {
+				os.Remove(dest)
+				return "", fmt.Errorf("download %s: got a sign-in page, not the file — re-authenticate to grant the files:read scope", file.Name)
+			}
+		}
+	}
+	return dest, nil
 }
 
 // Search runs search.messages (needs the search:read user scope).

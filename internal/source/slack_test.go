@@ -128,6 +128,33 @@ func TestMpimName(t *testing.T) {
 	}
 }
 
+// TestToMessageMapsFiles: toMessage maps slack.File entries to data.File,
+// preserving name and url_private_download.
+func TestToMessageMapsFiles(t *testing.T) {
+	s := &Slack{users: map[string]data.User{}}
+	m := slack.Message{Msg: slack.Msg{
+		Timestamp: "1718000000.000100",
+		User:      "U1",
+		Files: []slack.File{{
+			ID:                 "F1",
+			Name:               "a.pdf",
+			URLPrivateDownload: "https://x/a",
+			Size:               10,
+		}},
+	}}
+	got := s.toMessage(m)
+	if len(got.Files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(got.Files))
+	}
+	f := got.Files[0]
+	if f.Name != "a.pdf" {
+		t.Errorf("File.Name = %q, want a.pdf", f.Name)
+	}
+	if f.URL != "https://x/a" {
+		t.Errorf("File.URL = %q, want https://x/a", f.URL)
+	}
+}
+
 func TestColorForIsStable(t *testing.T) {
 	if ColorFor("U123") != ColorFor("U123") {
 		t.Error("ColorFor must be deterministic")

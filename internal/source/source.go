@@ -49,6 +49,9 @@ type Source interface {
 	// Upload posts one or more local files to a conversation as a single
 	// message, with an optional comment. Requires the files:write scope.
 	Upload(convID string, paths []string, comment string) error
+	// Download saves a message file to destDir (created if missing), returning the
+	// saved path. Uses the authenticated file URL (url_private_download).
+	Download(file data.File, destDir string) (savedPath string, err error)
 }
 
 // Conversation aliases the domain type for the interface signatures above.

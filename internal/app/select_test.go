@@ -20,7 +20,7 @@ func TestCellAtRegion(t *testing.T) {
 	}
 
 	// In-region: top-left corner of content area.
-	c, ok := m.cellAt(sidebarWidth+2, 2)
+	c, _, ok := m.cellAt(sidebarWidth+2, 2)
 	if !ok {
 		t.Fatal("cellAt(sidebarWidth+2, 2) should be in-region, got ok=false")
 	}
@@ -32,19 +32,19 @@ func TestCellAtRegion(t *testing.T) {
 	}
 
 	// Out left/up: (0, 0) is in the sidebar.
-	_, ok = m.cellAt(0, 0)
+	_, _, ok = m.cellAt(0, 0)
 	if ok {
 		t.Error("cellAt(0, 0) should be out-of-region (left of content), got ok=true")
 	}
 
 	// Out right: x == sidebarWidth+2+innerW is one past the right edge.
-	_, ok = m.cellAt(sidebarWidth+2+innerW, 2)
+	_, _, ok = m.cellAt(sidebarWidth+2+innerW, 2)
 	if ok {
 		t.Errorf("cellAt(sidebarWidth+2+innerW=%d, 2) should be out-of-region (right), got ok=true", sidebarWidth+2+innerW)
 	}
 
 	// Out below: y == 2+innerH is one past the bottom edge.
-	_, ok = m.cellAt(sidebarWidth+2, 2+innerH)
+	_, _, ok = m.cellAt(sidebarWidth+2, 2+innerH)
 	if ok {
 		t.Errorf("cellAt(sidebarWidth+2, 2+innerH=%d) should be out-of-region (below), got ok=true", 2+innerH)
 	}

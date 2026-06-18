@@ -26,7 +26,6 @@ import (
 
 const (
 	sidebarWidth = 30
-	threadWidth  = 44
 
 	focusSidebar  = "sidebar"
 	focusMessages = "messages"
@@ -41,13 +40,13 @@ const maxComposerLines = 4
 func (m Model) draftWidth() int {
 	centerW := m.width - sidebarWidth - 1
 	if m.threadOpen() {
-		centerW = m.width - sidebarWidth - threadWidth - 2
+		centerW = m.width - sidebarWidth - m.threadWidth - 2
 	}
 	return max(4, (centerW - 2) - 24)
 }
 
 func (m Model) threadDraftWidth() int {
-	return max(4, (threadWidth - 2) - 24)
+	return max(4, (m.threadWidth - 2) - 24)
 }
 
 // wrappedRows counts the display rows value occupies in a textarea of width w —
@@ -190,10 +189,14 @@ type Model struct {
 	msgGen int // bumped whenever active-conversation layout could change
 
 	// mouse drag-to-select state
-	selecting bool // a left-drag selection is in progress
-	selActive bool // a selection is shown (persists after release until next key/click/scroll)
-	selAnchor cell // selection start in content coordinates
-	selHead   cell // selection end in content coordinates
+	selecting bool   // a left-drag selection is in progress
+	selActive bool   // a selection is shown (persists after release until next key/click/scroll)
+	selAnchor cell   // selection start in content coordinates
+	selHead   cell   // selection end in content coordinates
+	selPane   string // which pane the active selection lives in
+
+	threadWidth int  // current thread pane width (clamped)
+	resizing    bool // a thread-divider drag is in progress
 
 	copyToast  string // transient "copied" toast label ("" = hidden)
 	copyToastX int    // toast screen position (clamped in View)
@@ -394,6 +397,11 @@ func NewWith(src source.Source, prefs config.Prefs) Model {
 		hidden:          map[string]int{},
 	}
 	m.ensureHistory(activeID)
+	tw := prefs.ThreadWidth
+	if tw == 0 {
+		tw = 60
+	}
+	m.threadWidth = tw
 	m.sideSel = m.flatIndexOf(activeID)
 	m.msgSel = max(0, len(m.messages[activeID])-1)
 	return m
@@ -626,7 +634,7 @@ func (m Model) pageJump() int {
 func (m *Model) msgGeom() (ss, se, total, innerH int) {
 	centerW := m.width - sidebarWidth - 1
 	if m.threadOpen() {
-		centerW = m.width - sidebarWidth - threadWidth - 2
+		centerW = m.width - sidebarWidth - m.threadWidth - 2
 	}
 	innerH = (m.height - 2 - m.composerHeight() - m.attachRows()) - 2
 
@@ -667,7 +675,7 @@ func (m *Model) msgGeom() (ss, se, total, innerH int) {
 func (m Model) msgViewport() (lines []string, top, innerW, innerH int) {
 	centerW := m.width - sidebarWidth - 1
 	if m.threadOpen() {
-		centerW = m.width - sidebarWidth - threadWidth - 2
+		centerW = m.width - sidebarWidth - m.threadWidth - 2
 	}
 	innerW = centerW - 2
 	innerH = (m.height - 2 - m.composerHeight() - m.attachRows()) - 2
@@ -681,6 +689,31 @@ func (m Model) msgViewport() (lines []string, top, innerW, innerH int) {
 	}
 	if len(lines) > innerH {
 		top = clamp(windowBaseTop(ss, se, innerH, len(lines))+m.msgExtra, 0, len(lines)-innerH)
+	}
+	return
+}
+
+// threadViewport returns the thread pane's rendered lines, scroll offset (top),
+// inner dimensions, and the left edge screen column. Mirrors msgViewport for the
+// thread — shared by renderThread and the mouse hit-test helpers.
+func (m Model) threadViewport() (lines []string, top, innerW, innerH, x0 int) {
+	root, ok := m.threadRoot()
+	if !ok {
+		return nil, 0, 0, 0, 0
+	}
+	innerW = m.threadWidth - 2
+	scrollH := (m.height - 2 - 2) - m.threadComposerHeight()
+	innerH = scrollH
+	x0 = m.width - m.threadWidth + 1
+	var starts []int
+	lines, starts = components.ThreadScroll(m.pal, m.ws, root, m.threadSel, m.focus == focusThread, innerW)
+	ss, se := 0, 0
+	if r := len(root.Replies); r > 0 {
+		ti := clamp(m.threadSel, 0, r-1)
+		ss, se = starts[ti], starts[ti+1]-1
+	}
+	if len(lines) > scrollH {
+		top = windowBaseTop(ss, se, scrollH, len(lines))
 	}
 	return
 }
@@ -797,6 +830,7 @@ func (m *Model) markThreadSeen(convID, rootID string) {
 
 func (m *Model) closeThread() {
 	m.threadRootID = ""
+	m.resizing = false
 	m.focus = focusMessages
 	m.syncComposerSizes()
 }
@@ -892,7 +926,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		desired := m.prefs.ThreadWidth
+		if desired <= 0 {
+			desired = 60
+		}
+		m.threadWidth = m.clampThreadWidth(desired)
 		m.syncComposerSizes()
+		m.resizing = false
 		m.selecting, m.selActive = false, false // reflow invalidates layout-relative selection coords
 		return m, nil
 	case pollMsg:
@@ -998,6 +1038,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.flash(msg.err)
 		}
 		return m, m.historyCmd(msg.convID) // refresh the conversation that received the upload
+	case downloadMsg:
+		if msg.err != nil {
+			return m, m.flash(msg.err)
+		}
+		m.copyToast = savedToastLabel(msg.paths)
+		m.copyToastX = sidebarWidth + 2
+		_, _, _, innerH := m.msgViewport()
+		m.copyToastY = clamp(2+innerH-1, 0, m.height-2)
+		m.copySeq++
+		return m, copyToastTick(m.copySeq)
 	case eventMsg:
 		cmds := append(m.applyEvent(msg.ev), m.titleCmd())
 		if s, ok := m.src.(streamer); ok {
@@ -1025,22 +1075,50 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.selecting, m.selActive = false, false // a fresh click dismisses any prior selection
 			m.copyToast = ""
-			if c, ok := m.cellAt(msg.X, msg.Y); ok {
+			// Check for divider grab before text-selection.
+			if m.threadOpen() && msg.Y >= 1 && msg.Y < m.height-1 {
+				edge := m.width - m.threadWidth
+				if msg.X >= edge-1 && msg.X <= edge {
+					m.resizing = true
+					return m, nil
+				}
+			}
+			if c, pane, ok := m.cellAt(msg.X, msg.Y); ok {
 				m.selAnchor, m.selHead = c, c
+				m.selPane = pane
 				m.selecting, m.selActive = true, true
 			}
 			return m, nil
 		case tea.MouseActionMotion:
+			if m.resizing {
+				if !m.threadOpen() {
+					m.resizing = false
+				} else {
+					m.threadWidth = m.clampThreadWidth(m.width - msg.X)
+					m.invalidateGeom()
+					m.syncComposerSizes()
+					return m, nil
+				}
+			}
 			if m.selecting {
-				if c, ok := m.cellAt(msg.X, msg.Y); ok {
+				if c, pane, ok := m.cellAt(msg.X, msg.Y); ok && pane == m.selPane {
 					m.selHead = c
 				}
 			}
 			return m, nil
 		case tea.MouseActionRelease:
+			if m.resizing {
+				m.resizing = false
+				m.prefs.ThreadWidth = m.threadWidth // in-memory desired, always
+				if m.persistState {
+					p := m.prefs
+					return m, func() tea.Msg { _ = config.Save(p); return nil }
+				}
+				return m, nil
+			}
 			if m.selecting {
 				m.selecting = false
-				if c, ok := m.cellAt(msg.X, msg.Y); ok {
+				if c, pane, ok := m.cellAt(msg.X, msg.Y); ok && pane == m.selPane {
 					m.selHead = c // the release position is authoritative
 				}
 				text := m.selectionText()
@@ -1294,6 +1372,11 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.openMsgLinks()
 		}
 
+	case "S": // save the selected message's file(s) to ~/Downloads
+		if m.focus == focusMessages {
+			return m, m.downloadFiles()
+		}
+
 	case "A": // open the attach-file prompt
 		return m, m.openAttach()
 
@@ -1314,8 +1397,14 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "T": // threads inbox: every thread you participate in
 		return m, m.openThreadsPicker()
 
-	case "y": // yank the selected message's text to the clipboard
-		if msg, ok := m.selectedMsg(); ok {
+	case "y": // yank the selected message or thread reply to the clipboard
+		if m.focus == focusThread {
+			if r, ok := m.selectedReply(); ok {
+				if err := clipboard.WriteAll(r.Text); err != nil {
+					return m, m.flash(fmt.Errorf("clipboard: %w", err))
+				}
+			}
+		} else if msg, ok := m.selectedMsg(); ok {
 			if err := clipboard.WriteAll(msg.Text); err != nil {
 				return m, m.flash(fmt.Errorf("clipboard: %w", err))
 			}
@@ -1593,6 +1682,16 @@ func max(a, b int) int {
 // gap renders a 1-col vertical separator filled with the app background.
 func (m Model) gap(height int) string {
 	return lipgloss.NewStyle().Width(1).Height(height).Background(m.pal.Bg).Render("")
+}
+
+// clampThreadWidth keeps the thread pane within usable bounds.
+// minW=34 keeps the thread readable; maxW ensures center gets at least 24 cols.
+func (m Model) clampThreadWidth(w int) int {
+	minW, maxW := 34, m.width-sidebarWidth-2-24
+	if maxW < minW {
+		maxW = minW
+	}
+	return clamp(w, minW, maxW)
 }
 
 // overlay composites an over block onto base at cell (x,y), ansi-aware.

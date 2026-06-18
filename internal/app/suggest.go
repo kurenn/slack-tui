@@ -240,7 +240,7 @@ func (m Model) overlaySuggest(frame string) string {
 	x := sidebarWidth + 2 // above the center composer
 	composerH := m.composerHeight()
 	if m.focus == focusThread {
-		x = m.width - threadWidth + 1
+		x = m.width - m.threadWidth + 1
 		composerH = m.threadComposerHeight() + 1
 	}
 	if x+w > m.width {

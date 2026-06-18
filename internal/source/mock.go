@@ -2,6 +2,7 @@ package source
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +18,8 @@ type Mock struct {
 	joinable  []data.Conversation
 	uploads   []UploadRecord
 	UploadErr error // if non-nil, Upload returns this error (still records the call)
+	downloads    []DownloadRecord
+	DownloadErr  error // if non-nil, Download returns this error (still records the call)
 }
 
 // UploadRecord captures the arguments of a single Upload call for inspection
@@ -25,6 +28,13 @@ type UploadRecord struct {
 	ConvID  string
 	Paths   []string
 	Comment string
+}
+
+// DownloadRecord captures the arguments of a single Download call for
+// inspection in tests.
+type DownloadRecord struct {
+	File data.File
+	Dir  string
 }
 
 // NewMock builds a mock source from the sample workspace.
@@ -169,6 +179,16 @@ func (m *Mock) Upload(convID string, paths []string, comment string) error {
 
 // Uploads returns all Upload calls recorded so far.
 func (m *Mock) Uploads() []UploadRecord { return m.uploads }
+
+// Download records the call and returns the joined path. Returns DownloadErr if
+// set (call is still recorded so tests can inspect it).
+func (m *Mock) Download(file data.File, destDir string) (string, error) {
+	m.downloads = append(m.downloads, DownloadRecord{File: file, Dir: destDir})
+	return filepath.Join(destDir, file.Name), m.DownloadErr
+}
+
+// Downloads returns all Download calls recorded so far.
+func (m *Mock) Downloads() []DownloadRecord { return m.downloads }
 
 // Search does a naive case-insensitive substring search over all messages.
 func (m *Mock) Search(query string) ([]SearchHit, error) {

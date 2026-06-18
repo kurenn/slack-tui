@@ -64,7 +64,9 @@ func wrappedRows(value string, w int) int {
 	return max(1, rows)
 }
 
-// composerHeight is the center composer's total height (borders + draft rows).
+// composerHeight is the center composer's total height (borders + draft rows only).
+// Chip/note rows (attachRows) are rendered between the message pane and the composer
+// and must be subtracted separately — adding them here causes a double-count.
 func (m Model) composerHeight() int {
 	return 2 + clamp(wrappedRows(m.draft.Value(), m.draftWidth()), 1, maxComposerLines)
 }
@@ -143,6 +145,11 @@ type Model struct {
 	findOpen    bool
 	findInput   textinput.Model
 	searchQuery string // last local-find query (n/N repeat)
+
+	pendingFiles []string        // local files staged for the active conversation
+	attachOpen   bool            // the "attach file" input overlay is open
+	attachInput  textinput.Model
+	uploadNote   string          // transient "uploading…" note above the composer
 
 	newMark       map[string]string // convID → first-unread message ID (the ── new ── rule)
 	pendingUnread map[string]int    // unread count snapshot for channels opening async
@@ -378,6 +385,7 @@ func NewWith(src source.Source, prefs config.Prefs) Model {
 		statusTextInput: mkInput(),
 		pickerInput:     mkInput(),
 		findInput:       mkInput(),
+		attachInput:     mkInput(),
 		newMark:         map[string]string{},
 		pendingUnread:   map[string]int{},
 		pendingSelect:   map[string]string{},
@@ -517,6 +525,8 @@ func (m *Model) openChannel(id string) tea.Cmd {
 		m.draft.SetValue(m.drafts[id])
 		m.syncComposerSizes()
 	}
+	m.pendingFiles = nil // clear staging so files don't accidentally post to the wrong conv
+	m.uploadNote = ""
 	unread := m.meta[id].Unread // captured before clearing — drives the ── new ── rule
 	m.activeID = id
 	m.touchRecent(id)
@@ -618,7 +628,7 @@ func (m *Model) msgGeom() (ss, se, total, innerH int) {
 	if m.threadOpen() {
 		centerW = m.width - sidebarWidth - threadWidth - 2
 	}
-	innerH = (m.height - 2 - m.composerHeight()) - 2
+	innerH = (m.height - 2 - m.composerHeight() - m.attachRows()) - 2
 
 	// Build a cheap fingerprint from all inputs that affect line layout.
 	// fmt.Sprintf is ~50 ns for these small fields — negligible vs MessagesBody.
@@ -660,7 +670,7 @@ func (m Model) msgViewport() (lines []string, top, innerW, innerH int) {
 		centerW = m.width - sidebarWidth - threadWidth - 2
 	}
 	innerW = centerW - 2
-	innerH = (m.height - 2 - m.composerHeight()) - 2
+	innerH = (m.height - 2 - m.composerHeight() - m.attachRows()) - 2
 	msgs := m.curMsgs()
 	var starts []int
 	lines, starts = components.MessagesBody(m.pal, m.ws, msgs, m.msgSel, m.focus == focusMessages, m.density, innerW, m.newMark[m.activeID])
@@ -814,6 +824,9 @@ func nowClock() string { return time.Now().Format("15:04") }
 // sendMessage appends the draft optimistically and posts it off the UI thread;
 // sentMsg reconciles (real ID on success, removal + draft restore on error).
 func (m *Model) sendMessage() tea.Cmd {
+	if len(m.pendingFiles) > 0 {
+		return m.sendAttachments()
+	}
 	text := strings.TrimSpace(m.draft.Value())
 	if text == "" {
 		return nil
@@ -974,6 +987,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.copyToast = ""
 		}
 		return m, nil
+	case uploadMsg:
+		m.uploadNote = ""
+		if msg.err != nil {
+			m.pendingFiles = msg.paths // restore staged files so the user can retry
+			if strings.TrimSpace(m.draft.Value()) == "" {
+				m.draft.SetValue(msg.comment)
+				m.syncComposerSizes()
+			}
+			return m, m.flash(msg.err)
+		}
+		return m, m.historyCmd(msg.convID) // refresh the conversation that received the upload
 	case eventMsg:
 		cmds := append(m.applyEvent(msg.ev), m.titleCmd())
 		if s, ok := m.src.(streamer); ok {
@@ -1059,6 +1083,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.findOpen {
 			return m.findKey(msg)
 		}
+		if m.attachOpen {
+			return m.attachKey(msg)
+		}
 		if m.statusTextOpen {
 			return m.statusTextKey(msg)
 		}
@@ -1067,6 +1094,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.paletteOpen {
 			return m.paletteKey(msg)
+		}
+		if msg.Paste {
+			if paths := parseDroppedPaths(string(msg.Runes)); len(paths) > 0 {
+				return m, m.stageAttachments(paths)
+			}
 		}
 		if m.insert {
 			return m.insertKey(msg)
@@ -1082,6 +1114,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.findOpen {
 		var cmd tea.Cmd
 		m.findInput, cmd = m.findInput.Update(msg)
+		return m, cmd
+	}
+	if m.attachOpen {
+		var cmd tea.Cmd
+		m.attachInput, cmd = m.attachInput.Update(msg)
 		return m, cmd
 	}
 	if m.paletteOpen {
@@ -1109,6 +1146,11 @@ func (m Model) insertKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, m.quit()
 	case "esc":
+		if len(m.pendingFiles) > 0 { // esc dismisses staged files first, stays in INSERT
+			m.pendingFiles = nil
+			m.uploadNote = ""
+			return m, nil
+		}
 		if m.editingID != "" {
 			m.cancelEdit()
 		}
@@ -1251,6 +1293,9 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.focus == focusMessages {
 			return m, m.openMsgLinks()
 		}
+
+	case "A": // open the attach-file prompt
+		return m, m.openAttach()
 
 	case "/": // find within the loaded channel history
 		return m, m.openFind()

@@ -26,6 +26,7 @@ var helpRows = []helpRow{
 	{"e", "edit your message"},
 	{"dd", "delete your message"},
 	{"o", "open message links"},
+	{"A", "attach file · or drag-drop"},
 	{"/ · n / N", "find in channel · next/prev"},
 	{"s", "search the workspace"},
 	{"T", "threads inbox"},

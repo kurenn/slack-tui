@@ -1,6 +1,7 @@
 package app
 
 import (
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -86,6 +87,9 @@ func (m Model) View() string {
 	if m.findOpen {
 		frame = m.overlayFind(frame)
 	}
+	if m.attachOpen {
+		frame = m.overlayAttach(frame)
+	}
 	if m.picker.open {
 		frame = m.overlayPicker(frame)
 	}
@@ -122,7 +126,7 @@ func (m Model) overlayPalette(frame string) string {
 }
 
 func (m Model) renderCenter(conv data.Conversation, w, bodyH int) string {
-	paneH := bodyH - m.composerHeight()
+	paneH := bodyH - m.composerHeight() - m.attachRows()
 	innerH := paneH - 2
 
 	var body string
@@ -191,7 +195,24 @@ func (m Model) renderCenter(conv data.Conversation, w, bodyH int) string {
 	// render copy would leave the real textarea repositioning at a stale size.
 	composer := components.Composer(m.pal, prompt, m.draft.View(), insertHere, w)
 
-	return lipgloss.JoinVertical(lipgloss.Left, msgsPane, composer)
+	parts := []string{msgsPane}
+	innerW := w - 2
+	if len(m.pendingFiles) > 0 {
+		names := make([]string, len(m.pendingFiles))
+		for i, p := range m.pendingFiles {
+			names[i] = filepath.Base(p)
+		}
+		chip := lipgloss.NewStyle().Foreground(m.pal.Accent).Render("📎 "+strings.Join(names, "  ")) +
+			lipgloss.NewStyle().Foreground(m.pal.Dim2).Render("   ⏎ send · esc clear")
+		chip = ansi.Truncate(chip, innerW, "…")
+		parts = append(parts, chip)
+	}
+	if m.uploadNote != "" {
+		note := ansi.Truncate(lipgloss.NewStyle().Foreground(m.pal.Dim).Render(m.uploadNote), innerW, "…")
+		parts = append(parts, note)
+	}
+	parts = append(parts, composer)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
 func (m Model) renderThread(conv data.Conversation, bodyH int) string {

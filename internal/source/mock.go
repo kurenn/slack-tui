@@ -11,10 +11,20 @@ import (
 // Mock is an in-memory Source backed by the sample workspace. It returns
 // instantly, so the app behaves synchronously when using it.
 type Mock struct {
-	ws       *data.Workspace
-	messages map[string][]data.Message
-	reacted  map[string]bool // convID/msgID/name → I reacted (for toggling)
-	joinable []data.Conversation
+	ws        *data.Workspace
+	messages  map[string][]data.Message
+	reacted   map[string]bool // convID/msgID/name → I reacted (for toggling)
+	joinable  []data.Conversation
+	uploads   []UploadRecord
+	UploadErr error // if non-nil, Upload returns this error (still records the call)
+}
+
+// UploadRecord captures the arguments of a single Upload call for inspection
+// in tests.
+type UploadRecord struct {
+	ConvID  string
+	Paths   []string
+	Comment string
 }
 
 // NewMock builds a mock source from the sample workspace.
@@ -150,6 +160,15 @@ func (m *Mock) Join(convID string) (data.Conversation, error) {
 	}
 	return data.Conversation{}, fmt.Errorf("unknown channel %q", convID)
 }
+
+// Upload records the call in-memory and returns UploadErr (nil by default).
+func (m *Mock) Upload(convID string, paths []string, comment string) error {
+	m.uploads = append(m.uploads, UploadRecord{ConvID: convID, Paths: paths, Comment: comment})
+	return m.UploadErr
+}
+
+// Uploads returns all Upload calls recorded so far.
+func (m *Mock) Uploads() []UploadRecord { return m.uploads }
 
 // Search does a naive case-insensitive substring search over all messages.
 func (m *Mock) Search(query string) ([]SearchHit, error) {

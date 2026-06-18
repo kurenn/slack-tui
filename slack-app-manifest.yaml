@@ -47,6 +47,7 @@ oauth_config:
       - mpim:read
       - users:read
       - chat:write
+      - files:write           # attach/upload files
       - reactions:read
       - reactions:write       # add/remove reactions (`a`)
       - users:write           # set presence (active/away)

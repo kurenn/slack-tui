@@ -28,6 +28,7 @@ var featureFor = map[string]string{
 	"dnd:write":           "Do Not Disturb",
 	"users.profile:write": "status text",
 	"chat:write":          "sending messages",
+	"files:write":         "attaching files",
 }
 
 // httpClient is the client used for the network checks; a var so tests could

@@ -46,6 +46,9 @@ type Source interface {
 	Joinable() ([]Conversation, error)
 	// Join joins a channel and returns it; the caller adds it to the sidebar.
 	Join(convID string) (Conversation, error)
+	// Upload posts one or more local files to a conversation as a single
+	// message, with an optional comment. Requires the files:write scope.
+	Upload(convID string, paths []string, comment string) error
 }
 
 // Conversation aliases the domain type for the interface signatures above.

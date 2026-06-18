@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -695,6 +697,55 @@ func (s *Slack) Join(convID string) (data.Conversation, error) {
 func (s *Slack) Delete(convID, msgID string) error {
 	_, _, err := s.api.DeleteMessage(convID, msgID)
 	return err
+}
+
+// Upload posts local files to convID as one message via Slack's external
+// upload flow (getUploadURLExternal → upload bytes → completeUploadExternal).
+func (s *Slack) Upload(convID string, paths []string, comment string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	var summaries []slack.FileSummary
+	for _, p := range paths {
+		st, err := os.Stat(p)
+		if err != nil {
+			return fmt.Errorf("attach %s: %w", filepath.Base(p), err)
+		}
+		if st.IsDir() {
+			return fmt.Errorf("attach %s: is a directory", filepath.Base(p))
+		}
+		if st.Size() == 0 {
+			return fmt.Errorf("attach %s: empty file", filepath.Base(p))
+		}
+		f, err := os.Open(p)
+		if err != nil {
+			return fmt.Errorf("attach %s: %w", filepath.Base(p), err)
+		}
+		name := filepath.Base(p)
+		up, err := s.api.GetUploadURLExternalContext(ctx, slack.GetUploadURLExternalParameters{
+			FileName: name, FileSize: int(st.Size()),
+		})
+		if err != nil {
+			f.Close()
+			return fmt.Errorf("get upload url for %s: %w", name, err)
+		}
+		if err := s.api.UploadToURL(ctx, slack.UploadToURLParameters{
+			UploadURL: up.UploadURL, Reader: f, Filename: name,
+		}); err != nil {
+			f.Close()
+			return fmt.Errorf("upload %s: %w", name, err)
+		}
+		f.Close()
+		summaries = append(summaries, slack.FileSummary{ID: up.FileID, Title: name})
+	}
+	if _, err := s.api.CompleteUploadExternalContext(ctx, slack.CompleteUploadExternalParameters{
+		Files: summaries, Channel: convID, InitialComment: s.encodeMentions(comment),
+	}); err != nil {
+		return fmt.Errorf("complete upload: %w", err)
+	}
+	return nil
 }
 
 // Search runs search.messages (needs the search:read user scope).

@@ -52,6 +52,13 @@ type Source interface {
 	// Download saves a message file to destDir (created if missing), returning the
 	// saved path. Uses the authenticated file URL (url_private_download).
 	Download(file data.File, destDir string) (savedPath string, err error)
+	// OpenDM opens or resumes the 1:1 IM with userID and returns the conversation.
+	OpenDM(userID string) (Conversation, error)
+	// Leave leaves a channel (the caller removes it from the sidebar).
+	Leave(convID string) error
+	// Snooze starts Do-Not-Disturb for the given number of minutes (minimum 1;
+	// callers should pass a positive value).
+	Snooze(minutes int) error
 }
 
 // Conversation aliases the domain type for the interface signatures above.

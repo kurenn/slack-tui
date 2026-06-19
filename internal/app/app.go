@@ -865,6 +865,16 @@ func (m *Model) sendMessage() tea.Cmd {
 	if text == "" {
 		return nil
 	}
+	if cmd, done := m.runSlash(text); done {
+		return cmd
+	}
+	return m.sendText(text)
+}
+
+// sendText optimistically appends text and posts it (no slash interception).
+// Use this from slash handlers that have already transformed the text, so the
+// dispatcher is never re-entered on the transformed value.
+func (m *Model) sendText(text string) tea.Cmd {
 	delete(m.hidden, m.activeID)
 	m.pendingSeq++
 	pid := fmt.Sprintf("%s%d", pendingPrefix, m.pendingSeq)
@@ -999,6 +1009,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.applyJoinable(msg)
 	case joinedMsg:
 		return m, m.applyJoined(msg)
+	case dmOpenedMsg:
+		return m, m.applyDMOpened(msg)
+	case leftMsg:
+		return m, m.applyLeft(msg)
 	case wsMsg:
 		return m, m.applyWorkspace(msg)
 	case repliesMsg:

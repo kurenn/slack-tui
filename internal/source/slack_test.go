@@ -217,6 +217,32 @@ func TestGemojiFallback(t *testing.T) {
 	}
 }
 
+// TestRichTextCode: inline-code elements get backtick wrapping; preformatted
+// blocks become fenced code blocks.
+func TestRichTextCode(t *testing.T) {
+	blk := slack.NewRichTextBlock("",
+		slack.NewRichTextSection(
+			slack.NewRichTextSectionTextElement("x", &slack.RichTextSectionTextStyle{Code: true}),
+		),
+		&slack.RichTextPreformatted{
+			Type: "rich_text_preformatted",
+			Elements: []slack.RichTextSectionElement{
+				slack.NewRichTextSectionTextElement("line1\nline2", nil),
+			},
+		},
+	)
+	got := richTextText(blk)
+	if !strings.Contains(got, "`x`") {
+		t.Errorf("inline-code element should be wrapped in backticks, got %q", got)
+	}
+	if !strings.Contains(got, "```") {
+		t.Errorf("preformatted block should produce a fenced code block, got %q", got)
+	}
+	if !strings.Contains(got, "line1\nline2") {
+		t.Errorf("preformatted text should appear in output, got %q", got)
+	}
+}
+
 func TestRenderTextEmojiShortcodes(t *testing.T) {
 	s := &Slack{}
 	cases := []struct{ in, want string }{

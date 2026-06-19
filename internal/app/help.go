@@ -36,6 +36,7 @@ var helpRows = []helpRow{
 	{"drag divider", "resize the thread pane"},
 	{"] / [", "next / prev unread"},
 	{"x", "hide · un-hide conversation"},
+	{"/cmd", "slash commands · /shrug /dm /away …"},
 	{"ctrl+k", "command palette"},
 	{",", "settings"},
 	{"ctrl+r", "refresh"},

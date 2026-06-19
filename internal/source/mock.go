@@ -20,6 +20,9 @@ type Mock struct {
 	UploadErr error // if non-nil, Upload returns this error (still records the call)
 	downloads    []DownloadRecord
 	DownloadErr  error // if non-nil, Download returns this error (still records the call)
+	opened    []string // userIDs passed to OpenDM
+	left      []string // convIDs passed to Leave
+	snoozed   []int    // minutes passed to Snooze
 }
 
 // UploadRecord captures the arguments of a single Upload call for inspection
@@ -208,6 +211,33 @@ func (m *Mock) Search(query string) ([]SearchHit, error) {
 	}
 	return out, nil
 }
+
+// OpenDM records the userID and returns a deterministic DM conversation.
+func (m *Mock) OpenDM(userID string) (data.Conversation, error) {
+	m.opened = append(m.opened, userID)
+	return data.Conversation{ID: "dm_" + userID, Type: "dm", UserID: userID, Name: userID}, nil
+}
+
+// Opened returns the userIDs that were passed to OpenDM, in call order.
+func (m *Mock) Opened() []string { return m.opened }
+
+// Leave records the convID and returns nil.
+func (m *Mock) Leave(convID string) error {
+	m.left = append(m.left, convID)
+	return nil
+}
+
+// Left returns the convIDs that were passed to Leave, in call order.
+func (m *Mock) Left() []string { return m.left }
+
+// Snooze records the minutes and returns nil.
+func (m *Mock) Snooze(minutes int) error {
+	m.snoozed = append(m.snoozed, minutes)
+	return nil
+}
+
+// Snoozed returns the minutes values passed to Snooze, in call order.
+func (m *Mock) Snoozed() []int { return m.snoozed }
 
 func hm() string    { now := time.Now(); return fmt.Sprintf("%02d:%02d", now.Hour(), now.Minute()) }
 func stamp() string { return strings.TrimPrefix(fmt.Sprintf("%d", time.Now().UnixNano()), "1") }

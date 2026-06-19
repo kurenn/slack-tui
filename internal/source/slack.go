@@ -574,9 +574,32 @@ func blocksText(blocks slack.Blocks) []string {
 }
 
 // richTextText flattens a rich_text block's sections into plain mrkdwn.
+// Inline-code elements are wrapped in backticks; preformatted blocks become
+// fenced code blocks; quote blocks are prefixed with "> ".
 func richTextText(rtb *slack.RichTextBlock) string {
 	var b strings.Builder
 	for _, el := range rtb.Elements {
+		if pre, ok := el.(*slack.RichTextPreformatted); ok {
+			var code strings.Builder
+			for _, e := range pre.Elements {
+				if te, ok := e.(*slack.RichTextSectionTextElement); ok {
+					code.WriteString(te.Text)
+				}
+			}
+			b.WriteString("```\n" + code.String() + "\n```")
+			b.WriteString("\n")
+			continue
+		}
+		if qt, ok := el.(*slack.RichTextQuote); ok {
+			for _, e := range qt.Elements {
+				if te, ok := e.(*slack.RichTextSectionTextElement); ok {
+					for _, line := range strings.Split(te.Text, "\n") {
+						b.WriteString("> " + line + "\n")
+					}
+				}
+			}
+			continue
+		}
 		sec, ok := el.(*slack.RichTextSection)
 		if !ok {
 			continue
@@ -584,7 +607,11 @@ func richTextText(rtb *slack.RichTextBlock) string {
 		for _, e := range sec.Elements {
 			switch t := e.(type) {
 			case *slack.RichTextSectionTextElement:
-				b.WriteString(t.Text)
+				if t.Style != nil && t.Style.Code {
+					b.WriteString("`" + t.Text + "`")
+				} else {
+					b.WriteString(t.Text)
+				}
 			case *slack.RichTextSectionLinkElement:
 				if t.Text != "" && t.Text != t.URL {
 					b.WriteString(t.Text + " ")
@@ -697,6 +724,39 @@ func (s *Slack) Join(convID string) (data.Conversation, error) {
 		return data.Conversation{}, err
 	}
 	return data.Conversation{ID: ch.ID, Type: "channel", Name: ch.Name, Topic: ch.Topic.Value}, nil
+}
+
+// OpenDM opens or resumes the 1:1 IM with userID and returns the conversation.
+func (s *Slack) OpenDM(userID string) (data.Conversation, error) {
+	ctx, cancel := readCtx()
+	defer cancel()
+	ch, _, _, err := s.api.OpenConversationContext(ctx, &slack.OpenConversationParameters{Users: []string{userID}, ReturnIM: true})
+	if err != nil {
+		return data.Conversation{}, err
+	}
+	name := userID
+	if u, ok := s.users[userID]; ok && u.Name != "" {
+		name = u.Name
+	}
+	return data.Conversation{ID: ch.ID, Type: "dm", UserID: userID, Name: name}, nil
+}
+
+// Leave leaves a channel (the caller is responsible for removing it from the sidebar).
+func (s *Slack) Leave(convID string) error {
+	ctx, cancel := readCtx()
+	defer cancel()
+	_, err := s.api.LeaveConversationContext(ctx, convID)
+	return err
+}
+
+// Snooze starts Do-Not-Disturb for the given number of minutes. If minutes is
+// less than or equal to zero, it defaults to 120.
+func (s *Slack) Snooze(minutes int) error {
+	if minutes <= 0 {
+		minutes = 120
+	}
+	_, err := s.api.SetSnooze(minutes)
+	return err
 }
 
 // Delete removes a message via chat.delete.

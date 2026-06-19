@@ -3,6 +3,18 @@
 slack-tui follows semver-ish tags; every release ships binaries for
 macOS/Linux/Windows plus a Homebrew formula via goreleaser.
 
+## v0.5.1
+
+- **Emoji shortcodes** — `:warning:`, `:tada:`, etc. in message text now render
+  as glyphs (⚠️ 🎉) via the existing emoji table; unknown/custom names stay literal.
+- **Slash commands** — type a command in the composer: `/shrug` `/me` `/away`
+  `/active` `/dnd [min]` `/status <text>` `/dm @user` `/leave` `/search <q>`.
+  Each maps to a real Slack API; unknown commands flash "not supported" (Slack's
+  generic command API isn't open to OAuth apps), and a `/path` still sends as text.
+- **Code rendering** — inline `` `code` `` and ```` ``` ```` blocks render styled,
+  now including app/bot Block-Kit (`rich_text`) messages that previously dropped
+  their code formatting.
+
 ## v0.5.0
 
 - **Unread, for real** — per-conversation unread is now derived from the

@@ -1132,3 +1132,100 @@ func TestStateSnapshotCopiesHidden(t *testing.T) {
 		t.Error("snapshot should not contain \"engineering\" added after snapshot")
 	}
 }
+
+// TestStaleUnreadPollIgnored: a poll that fired before a conversation was read
+// must not re-flag it as unread when its (stale) result lands later.
+func TestStaleUnreadPollIgnored(t *testing.T) {
+	m := newSized()
+	// open A (active, read), then B (active) so A is non-active
+	a := m.ws.Channels[1].ID
+	b := m.ws.Channels[2].ID
+	m = WithSize(m, 100, 30)
+	m2, _ := m.Update(nil)
+	m = m2.(Model)
+	staleSeq := m.readSeq // a poll "fired" at this seq
+	m.openChannel(a)      // read A → readSeqOf[a] = readSeq++ (> staleSeq)
+	m.openChannel(b)      // B active, A non-active
+	// stale poll result for A (computed before the read) must be ignored
+	next, _ := m.Update(unreadMsg{counts: map[string]int{a: 7}, seq: staleSeq})
+	m = next.(Model)
+	if got := m.meta[a].Unread; got != 0 {
+		t.Errorf("stale poll re-flagged read conversation: meta[a].Unread = %d, want 0", got)
+	}
+	// a fresh poll (fired after the read) IS applied
+	next, _ = m.Update(unreadMsg{counts: map[string]int{a: 7}, seq: m.readSeq})
+	m = next.(Model)
+	if got := m.meta[a].Unread; got != 7 {
+		t.Errorf("fresh poll not applied: meta[a].Unread = %d, want 7", got)
+	}
+}
+
+// TestThreadReplyDoesNotInflateBadge: a plain thread reply in a non-active channel
+// must NOT bump the unread badge (it lives in the Threads view); a root message
+// must; a thread reply that @-mentions you must.
+func TestThreadReplyDoesNotInflateBadge(t *testing.T) {
+	m := newSized()
+	ch := m.ws.Channels[1].ID
+	other := m.ws.Channels[2].ID
+	m.openChannel(other) // make `ch` non-active
+	base := m.meta[ch].Unread
+
+	root := source.Event{ConvID: ch, Msg: data.Message{ID: "100.0", UserID: "U_OTHER"}}
+	m.applyInactiveEvent(root)
+	if got := m.meta[ch].Unread; got != base+1 {
+		t.Fatalf("root message should bump: got %d want %d", got, base+1)
+	}
+
+	reply := source.Event{ConvID: ch, ThreadTS: "100.0", Msg: data.Message{ID: "101.0", UserID: "U_OTHER"}}
+	m.applyInactiveEvent(reply)
+	if got := m.meta[ch].Unread; got != base+1 {
+		t.Fatalf("plain thread reply must NOT inflate badge: got %d want %d", got, base+1)
+	}
+
+	mentionReply := source.Event{ConvID: ch, ThreadTS: "100.0", Msg: data.Message{ID: "102.0", UserID: "U_OTHER", MentionsMe: true}}
+	m.applyInactiveEvent(mentionReply)
+	if got := m.meta[ch].Unread; got != base+2 || !m.meta[ch].Mention {
+		t.Fatalf("thread reply that @-mentions you must count+flag: got %d mention=%v", got, m.meta[ch].Mention)
+	}
+}
+
+// TestDMPollBoundedAndRotates: with many DMs the poll must (a) stay bounded per
+// round, (b) always include the recently-used head, and (c) cover every dormant
+// DM across enough rounds so none is starved of refresh.
+func TestDMPollBoundedAndRotates(t *testing.T) {
+	m := newSized()
+	m.ws.DMs = nil
+	for i := 0; i < 158; i++ {
+		id := fmt.Sprintf("D%03d", i)
+		m.ws.DMs = append(m.ws.DMs, data.Conversation{ID: id, Type: "dm", Name: id, UserID: "U" + id})
+	}
+	m.activeID = "other"
+	m.recent = []string{"D000", "D001", "D002"} // a few recently-used DMs
+
+	covered := map[string]bool{}
+	for round := 0; round < 60; round++ {
+		ids := m.dmIDs()
+		if len(ids) > dmPollHead+dmPollTail {
+			t.Fatalf("round %d polled %d DMs, over budget %d", round, len(ids), dmPollHead+dmPollTail)
+		}
+		for _, id := range ids {
+			covered[id] = true
+		}
+		// recently-used DMs must be polled every single round (freshness)
+		for _, r := range m.recent {
+			found := false
+			for _, id := range ids {
+				if id == r {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("round %d: recent DM %s not polled", round, r)
+			}
+		}
+		m.dmPollOffset += dmPollTail
+	}
+	if len(covered) != 158 {
+		t.Fatalf("rotation starved some DMs: covered %d/158", len(covered))
+	}
+}

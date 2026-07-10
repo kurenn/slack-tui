@@ -30,7 +30,10 @@ type (
 	presencePollMsg struct{}
 	// unreadMsg carries the unread counts actually fetched this round (a
 	// rate-limit abort returns a partial map; absent ids stay untouched).
-	unreadMsg struct{ counts map[string]int }
+	unreadMsg struct {
+		counts map[string]int
+		seq    int // m.readSeq when the poll fired; results for convs read since are stale
+	}
 	// presenceUpdateMsg carries freshly fetched presence statuses for DM
 	// partners (id → "online" | "away"). Distinct from presenceMsg (which
 	// pushes the user's OWN presence and carries only an error).
@@ -70,15 +73,58 @@ func (m Model) markReadCmd(convID string) tea.Cmd {
 	return func() tea.Msg { _ = src.MarkRead(convID, ts); return nil }
 }
 
+// DM unread can't be pushed over Socket Mode, so it's polled. Fanning out one
+// conversations.history call per DM doesn't scale: a large DM list (100s) blows
+// Slack's per-app history rate limit in a single round, 429s, aborts mid-sweep,
+// and leaves most counts stale. So poll a bounded subset each tick — the most
+// recently-used DMs every time (dmPollHead), plus a rotating window of the
+// dormant long tail (dmPollTail) so those still refresh over a few minutes.
+const (
+	dmPollHead = 10
+	dmPollTail = 5
+)
+
 // dmIDs / chanIDs list the conversations to poll, excluding the active one.
 func (m Model) dmIDs() []string {
-	ids := make([]string, 0, len(m.ws.DMs))
+	ordered := m.dmsByRecency() // recent-first; already excludes the active conv
+	if len(ordered) <= dmPollHead+dmPollTail {
+		return ordered
+	}
+	tail := ordered[dmPollHead:]
+	picked := make([]string, 0, dmPollHead+dmPollTail)
+	picked = append(picked, ordered[:dmPollHead]...)
+	start := m.dmPollOffset % len(tail)
+	for i := 0; i < dmPollTail; i++ {
+		picked = append(picked, tail[(start+i)%len(tail)])
+	}
+	return picked
+}
+
+// dmsByRecency returns every DM's ID ordered most-recently-opened first (then
+// load order), skipping the active conversation — the priority order the unread
+// poll walks so the DMs you actually use stay fresh.
+func (m Model) dmsByRecency() []string {
+	isDM := make(map[string]bool, len(m.ws.DMs))
 	for _, d := range m.ws.DMs {
 		if d.ID != m.activeID {
-			ids = append(ids, d.ID)
+			isDM[d.ID] = true
 		}
 	}
-	return ids
+	ordered := make([]string, 0, len(isDM))
+	seen := make(map[string]bool, len(isDM))
+	for _, id := range m.recent {
+		if isDM[id] && !seen[id] {
+			ordered = append(ordered, id)
+			seen[id] = true
+		}
+	}
+	for _, d := range m.ws.DMs {
+		if isDM[d.ID] && !seen[d.ID] {
+			ordered = append(ordered, d.ID)
+			seen[d.ID] = true
+		}
+	}
+	return ordered
 }
 
 // dmPartnerIDs collects the UserID of each 1:1 DM, skipping group DMs (mpims)
@@ -123,7 +169,7 @@ func (m Model) unreadCmd(ids []string) tea.Cmd {
 	if len(ids) == 0 {
 		return nil
 	}
-	src := m.src
+	src, seq := m.src, m.readSeq
 	return func() tea.Msg {
 		counts := map[string]int{}
 		sem := make(chan struct{}, 8)
@@ -152,7 +198,7 @@ func (m Model) unreadCmd(ids []string) tea.Cmd {
 			}(id)
 		}
 		wg.Wait()
-		return unreadMsg{counts}
+		return unreadMsg{counts: counts, seq: seq}
 	}
 }
 
@@ -244,7 +290,15 @@ func (m *Model) applyInactiveEvent(ev source.Event) []tea.Cmd {
 	}
 	delete(m.hidden, ev.ConvID) // a new message resurfaces a hidden conversation
 	meta := m.meta[ev.ConvID]
-	meta.Unread++
+	// Only main-timeline messages bump the channel badge — matching Slack's own
+	// count and the authoritative last_read derivation (which sees root messages
+	// only). Plain thread replies live in the Threads view, not the channel
+	// badge; counting them here ballooned thread-heavy channels for Socket Mode
+	// users. A reply that @-mentions you still counts, so it surfaces.
+	threadReply := ev.ThreadTS != "" && ev.ThreadTS != ev.Msg.ID
+	if !threadReply || ev.Msg.MentionsMe {
+		meta.Unread++
+	}
 	if ev.Msg.MentionsMe {
 		meta.Mention = true
 	}

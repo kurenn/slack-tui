@@ -3,6 +3,22 @@
 slack-tui follows semver-ish tags; every release ships binaries for
 macOS/Linux/Windows plus a Homebrew formula via goreleaser.
 
+## v0.5.2
+
+- **Unread that keeps up with a big DM list** — the DM unread poll used to fire
+  one `conversations.history` call per DM for *every* DM each round; with a large
+  DM list (100s) that instantly exceeds Slack's per-app rate limit, so the round
+  aborts and most counts never refresh (and the flood throttles everything else).
+  It now polls a bounded, recency-prioritized, rotating subset: your most
+  recently-used DMs every round, plus a rotating window of the dormant tail.
+- **Read state sticks** — a slow, rate-limited unread poll could return a count
+  computed *before* you opened a conversation and re-flag it as unread. Poll
+  results for a conversation read since the poll fired are now ignored.
+- **Channel badges stop ballooning** — for Socket Mode users, channel unread is
+  driven by live events, which were counting *thread replies* too, inflating
+  thread-heavy channels far past Slack's own count. Only main-timeline messages
+  bump the badge now; a thread reply that `@`-mentions you still counts.
+
 ## v0.5.1
 
 - **Emoji shortcodes** — `:warning:`, `:tada:`, etc. in message text now render

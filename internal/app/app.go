@@ -152,6 +152,9 @@ type Model struct {
 
 	newMark       map[string]string // convID → first-unread message ID (the ── new ── rule)
 	pendingUnread map[string]int    // unread count snapshot for channels opening async
+	readSeq       int               // bumped each time a conversation is opened/read
+	readSeqOf     map[string]int    // convID → readSeq when last read; guards stale unread polls
+	dmPollOffset  int               // rotating window cursor over the dormant DM tail
 	pendingSelect map[string]string // convID → message ID to select once history lands
 	pendingThread map[string]string // convID → root ID to open as a thread once history lands
 
@@ -391,6 +394,7 @@ func NewWith(src source.Source, prefs config.Prefs) Model {
 		attachInput:     mkInput(),
 		newMark:         map[string]string{},
 		pendingUnread:   map[string]int{},
+		readSeqOf:       map[string]int{},
 		pendingSelect:   map[string]string{},
 		pendingThread:   map[string]string{},
 		seenReplies:     map[string]int{},
@@ -540,6 +544,8 @@ func (m *Model) openChannel(id string) tea.Cmd {
 	m.touchRecent(id)
 	m.msgExtra = 0
 	m.meta[id] = components.Meta{Unread: 0, Mention: false}
+	m.readSeq++
+	m.readSeqOf[id] = m.readSeq // a slower in-flight unread poll can't re-flag this as unread
 	if _, ok := m.hidden[id]; ok {
 		m.hidden[id] = 0 // reading resets the resurface baseline so a later message re-shows it
 	}
@@ -948,7 +954,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pollMsg:
 		return m, tea.Batch(pollTick(), m.refresh(), m.markReadCmd(m.activeID))
 	case dmPollMsg:
-		return m, tea.Batch(dmPollTick(), m.unreadCmd(m.dmIDs()))
+		cmd := m.unreadCmd(m.dmIDs()) // reads the current rotation window…
+		m.dmPollOffset += dmPollTail  // …then advance it so next round covers fresh tail
+		return m, tea.Batch(dmPollTick(), cmd)
 	case chanPollMsg:
 		return m, tea.Batch(chanPollTick(), m.unreadCmd(m.chanIDs()))
 	case presencePollMsg:
@@ -965,6 +973,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for id, n := range msg.counts { // only ids actually fetched this round
 			if id == m.activeID {
 				continue
+			}
+			if m.readSeqOf[id] > msg.seq {
+				continue // opened/read since this poll fired — its count is stale, ignore it
 			}
 			mm := m.meta[id]
 			mm.Unread = n

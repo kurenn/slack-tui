@@ -126,9 +126,10 @@ type Model struct {
 	threadDraft textarea.Model
 	drafts      map[string]string // per-conversation unsent draft text
 
-	pendingSeq int // counter for optimistic (not yet acked) send IDs
-	errSeq     int // generation counter for the auto-clearing error banner
-	lastTitleN int // last unread total pushed to the terminal title
+	pendingSeq int  // counter for optimistic (not yet acked) send IDs
+	errSeq     int  // generation counter for the auto-clearing error banner
+	lastTitleN int  // last unread total pushed to the terminal title
+	markWarned bool // a mark-read failure was already reported (it repeats every poll)
 
 	helpOpen bool
 
@@ -988,6 +989,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, m.titleCmd()
+	case markedMsg:
+		// Every poll retries the mark, so a persistent failure (a token issued
+		// before the mark-read scopes) would banner forever — say it once.
+		if msg.err == nil || m.markWarned {
+			return m, nil
+		}
+		m.markWarned = true
+		return m, m.flash(msg.err)
 	case presenceMsg:
 		return m, m.flash(msg.err)
 	case historyMsg:
@@ -1596,6 +1605,13 @@ func (m *Model) applySent(msg sentMsg) tea.Cmd {
 		if msg.convID == m.activeID {
 			m.invalidateGeom()
 		}
+	}
+	// Posting through the API doesn't advance your own read marker the way the
+	// official clients do, so a conversation you just sent in stays unread
+	// everywhere else. Mark it now instead of waiting for the next poll — which
+	// the user may never reach if they switch conversations or quit.
+	if msg.convID == m.activeID {
+		return m.markReadCmd(msg.convID)
 	}
 	return nil
 }

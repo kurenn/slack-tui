@@ -23,7 +23,10 @@ import (
 var featureFor = map[string]string{
 	"reactions:write":     "a (react)",
 	"search:read":         "s (search)",
-	"channels:write":      "joining channels",
+	"channels:write":      "joining channels + marking public channels read",
+	"groups:write":        "marking private channels read (Slack keeps them unread)",
+	"im:write":            "opening DMs + marking DMs read (Slack keeps them unread)",
+	"mpim:write":          "marking group DMs read (Slack keeps them unread)",
 	"users:write":         "presence",
 	"dnd:write":           "Do Not Disturb",
 	"users.profile:write": "status text",

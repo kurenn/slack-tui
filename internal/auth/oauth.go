@@ -32,9 +32,14 @@ const (
 
 // UserScopes / BotScopes mirror slack-app-manifest.yaml.
 var (
+	// The four *:write scopes below are what conversations.mark needs — one per
+	// conversation kind. Without groups/im/mpim:write, marking read succeeds for
+	// public channels and fails with missing_scope everywhere else, so DMs and
+	// private channels stay bold in Slack's own clients forever.
 	UserScopes = []string{
 		"channels:history", "channels:read", "channels:write", "groups:history",
-		"groups:read", "im:history", "im:read", "mpim:history", "mpim:read",
+		"groups:read", "groups:write", "im:history", "im:read", "im:write",
+		"mpim:history", "mpim:read", "mpim:write",
 		"users:read", "chat:write", "files:read", "files:write", "reactions:read", "reactions:write",
 		"users:write", "dnd:write", "users.profile:write", "search:read",
 	}

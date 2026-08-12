@@ -288,10 +288,22 @@ func (s *Slack) MarkRead(convID, ts string) error {
 		return nil
 	}
 	if err := s.api.MarkConversation(convID, ts); err != nil {
-		return err
+		return markErr(err)
 	}
 	s.setLastRead(convID, ts)
 	return nil
+}
+
+// markErr translates a conversations.mark failure into something actionable.
+// conversations.mark needs a *:write scope per conversation kind (channels,
+// groups, im, mpim); a token issued before those were requested marks public
+// channels fine and fails everywhere else, which reads as "the TUI cleared the
+// badge but Slack still shows it unread".
+func markErr(err error) error {
+	if strings.Contains(err.Error(), "missing_scope") {
+		return fmt.Errorf("read state not syncing to Slack — token is missing a mark-read scope; run `slack-tui login` again to re-authorize")
+	}
+	return fmt.Errorf("mark read: %w", err)
 }
 
 // SetPresence updates presence/DND on Slack. Active/Away map to users.setPresence

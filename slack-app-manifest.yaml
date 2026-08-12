@@ -38,13 +38,16 @@ oauth_config:
     user:
       - channels:history
       - channels:read
-      - channels:write       # browse & join channels (palette)
+      - channels:write       # browse & join channels + mark public channels read
       - groups:history
       - groups:read
+      - groups:write         # mark private channels read (conversations.mark)
       - im:history
       - im:read
+      - im:write             # open DMs + mark DMs read (conversations.mark)
       - mpim:history
       - mpim:read
+      - mpim:write           # mark group DMs read (conversations.mark)
       - users:read
       - chat:write
       - files:read            # download files

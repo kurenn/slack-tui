@@ -61,16 +61,37 @@ func (m Model) setPresenceCmd() tea.Cmd {
 	return func() tea.Msg { return presenceMsg{src.SetPresence(status)} }
 }
 
-// markReadCmd tells the backend the conversation is read up to its latest message
-// (fire-and-forget), so unread polls/Socket Mode don't re-flag it.
+// markedMsg reports a mark-read attempt's outcome. The result used to be
+// discarded, which made a broken read-sync invisible: the sidebar badge clears
+// locally whatever the backend says, so a rejected mark only showed up as Slack
+// web/desktop stubbornly keeping the conversation unread. The update loop
+// surfaces the first failure and then stays quiet.
+type markedMsg struct{ err error }
+
+// markReadCmd tells the backend the conversation is read up to its latest
+// message, so unread polls/Socket Mode don't re-flag it — and neither do
+// Slack's own clients.
 func (m Model) markReadCmd(convID string) tea.Cmd {
-	msgs := m.messages[convID]
-	if len(msgs) == 0 {
+	ts := lastRealTS(m.messages[convID])
+	if ts == "" {
 		return nil
 	}
-	ts := msgs[len(msgs)-1].ID
 	src := m.src
-	return func() tea.Msg { _ = src.MarkRead(convID, ts); return nil }
+	return func() tea.Msg { return markedMsg{src.MarkRead(convID, ts)} }
+}
+
+// lastRealTS returns the newest message ID that is an actual Slack timestamp.
+// An optimistic send carries a local "pending-N" ID until the backend acks it;
+// conversations.mark rejects that, so a mark firing in the gap between send and
+// ack (the 6s poll, or leaving the conversation right after sending) would be
+// thrown away. Falling back to the last acked message keeps it valid.
+func lastRealTS(msgs []data.Message) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if !isPending(msgs[i].ID) {
+			return msgs[i].ID
+		}
+	}
+	return ""
 }
 
 // DM unread can't be pushed over Socket Mode, so it's polled. Fanning out one
@@ -211,13 +232,15 @@ func (m Model) markAllReadCmd(ids []string) tea.Cmd {
 	src := m.src
 	latest := map[string]string{}
 	for _, id := range ids {
-		if msgs := m.messages[id]; len(msgs) > 0 {
-			latest[id] = msgs[len(msgs)-1].ID
+		if ts := lastRealTS(m.messages[id]); ts != "" {
+			latest[id] = ts
 		}
 	}
 	return func() tea.Msg {
 		sem := make(chan struct{}, 4)
 		var wg sync.WaitGroup
+		var mu sync.Mutex
+		var firstErr error
 		for _, id := range ids {
 			wg.Add(1)
 			go func(id string) {
@@ -230,13 +253,19 @@ func (m Model) markAllReadCmd(ids []string) tea.Cmd {
 					if err != nil || len(msgs) == 0 {
 						return
 					}
-					ts = msgs[len(msgs)-1].ID
+					ts = lastRealTS(msgs)
 				}
-				_ = src.MarkRead(id, ts)
+				if err := src.MarkRead(id, ts); err != nil {
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = err
+					}
+					mu.Unlock()
+				}
 			}(id)
 		}
 		wg.Wait()
-		return nil
+		return markedMsg{firstErr}
 	}
 }
 

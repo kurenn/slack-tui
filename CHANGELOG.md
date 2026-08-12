@@ -3,6 +3,29 @@
 slack-tui follows semver-ish tags; every release ships binaries for
 macOS/Linux/Windows plus a Homebrew formula via goreleaser.
 
+## Unreleased
+
+- **Read state now actually reaches Slack** — `conversations.mark` needs a
+  `*:write` scope per conversation kind, and only `channels:write` was ever
+  requested. Marks succeeded for public channels and failed with
+  `missing_scope` for DMs, group DMs and private channels — silently, since the
+  result was discarded and the sidebar badge clears locally either way. The
+  symptom: read everything in the TUI, then find it all still bold in Slack
+  web/desktop. `groups:write`, `im:write` and `mpim:write` are now requested;
+  **existing installs must re-authorize** (update the app's scopes from the
+  manifest, then `slack-tui login` again) — `slack-tui doctor` names the
+  missing scopes and the feature each one breaks.
+- **A mark-read failure is visible** — the first rejected mark now surfaces in
+  the error banner ("read state not syncing to Slack…") instead of vanishing.
+  It reports once, not on every poll.
+- **Sending marks the conversation read** — posting via the API doesn't advance
+  your own read marker the way the official clients do, so a conversation you
+  just sent in stayed unread everywhere else until the next poll (or forever, if
+  you switched away or quit). The send's ack marks it now.
+- **Optimistic sends no longer break the mark** — a mark firing between a send
+  and its ack passed the local `pending-N` ID as a timestamp, which Slack
+  rejects. It falls back to the newest acked message.
+
 ## v0.5.2
 
 - **Unread that keeps up with a big DM list** — the DM unread poll used to fire

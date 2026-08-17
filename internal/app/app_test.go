@@ -1001,9 +1001,9 @@ func TestSendUnhidesActive(t *testing.T) {
 
 func TestWorkspaceSwitchFlow(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	_ = config.SaveWorkspace(config.Workspace{Name: "coba", TeamID: "T1", Tokens: config.Tokens{User: "u1"}})
+	_ = config.SaveWorkspace(config.Workspace{Name: "acme", TeamID: "T1", Tokens: config.Tokens{User: "u1"}})
 	_ = config.SaveWorkspace(config.Workspace{Name: "personal", TeamID: "T2", Tokens: config.Tokens{User: "u2"}})
-	_ = config.SetActiveWorkspace("coba")
+	_ = config.SetActiveWorkspace("acme")
 	m := newSized()
 	m.workspaces, m.activeWorkspace, _ = config.LoadWorkspaces()
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})

@@ -36,13 +36,50 @@ import (
 )
 
 const (
-	// RedirectURI must be registered in the Slack app (OAuth & Permissions →
-	// Redirect URLs). Loopback keeps the whole flow on this machine.
-	RedirectURI  = "http://localhost:9899/callback"
-	listenAddr   = "127.0.0.1:9899"
+	// Loopback ports tried in order, first free one wins. A single fixed port
+	// meant sign-in failed outright whenever something else held it (or a
+	// previous run hadn't released it yet) — with no way to pick another.
+	//
+	// Slack matches a redirect_uri against the app's registered Redirect URLs by
+	// prefix, but the port is part of that prefix, so EVERY port here must be
+	// registered separately. Keep this list and slack-app-manifest.* in sync;
+	// TestRedirectURIsMatchManifest enforces it.
+	portFirst = 9899
+	portCount = 5
+
 	authorizeURL = "https://slack.com/oauth/v2/authorize"
 	accessURL    = "https://slack.com/api/oauth.v2.access"
 )
+
+// RedirectURIs lists every loopback callback the app may use, in preference
+// order — exactly what belongs in the app's Redirect URLs.
+func RedirectURIs() []string {
+	out := make([]string, portCount)
+	for i := range out {
+		out[i] = redirectURI(portFirst + i)
+	}
+	return out
+}
+
+func redirectURI(port int) string {
+	return fmt.Sprintf("http://localhost:%d/callback", port)
+}
+
+// listenLoopback binds the first free port in the range, returning it with the
+// redirect URI that matches — the two must agree, since Slack compares the
+// redirect_uri sent at authorize time with the one sent at exchange time.
+func listenLoopback() (net.Listener, string, error) {
+	var lastErr error
+	for port := portFirst; port < portFirst+portCount; port++ {
+		ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		if err == nil {
+			return ln, redirectURI(port), nil
+		}
+		lastErr = err
+	}
+	return nil, "", fmt.Errorf("no free loopback port in %d–%d for the sign-in callback: %w",
+		portFirst, portFirst+portCount-1, lastErr)
+}
 
 // UserScopes / BotScopes mirror slack-app-manifest.yaml.
 var (
@@ -66,11 +103,11 @@ var (
 // AuthorizeURL builds the consent URL for the given app + state. A non-empty
 // challenge switches the request to PKCE, which also drops the bot scopes:
 // Slack rejects them on desktop (loopback) redirects once PKCE is enabled.
-func AuthorizeURL(clientID, state, challenge string) string {
+func AuthorizeURL(clientID, state, challenge, redirect string) string {
 	v := url.Values{
 		"client_id":    {clientID},
 		"user_scope":   {strings.Join(UserScopes, ",")},
-		"redirect_uri": {RedirectURI},
+		"redirect_uri": {redirect},
 		"state":        {state},
 	}
 	if challenge != "" {
@@ -118,9 +155,9 @@ func Login(ctx context.Context, creds config.OAuthCreds, onURL func(string)) (co
 		}
 		challenge = challengeFor(verif)
 	}
-	ln, err := net.Listen("tcp", listenAddr)
+	ln, redirect, err := listenLoopback()
 	if err != nil {
-		return config.Tokens{}, Team{}, fmt.Errorf("listen on %s: %w (another sign-in already running?)", listenAddr, err)
+		return config.Tokens{}, Team{}, err
 	}
 	defer ln.Close()
 
@@ -148,7 +185,7 @@ func Login(ctx context.Context, creds config.OAuthCreds, onURL func(string)) (co
 	go func() { _ = srv.Serve(ln) }()
 	defer srv.Shutdown(context.Background())
 
-	authURL := AuthorizeURL(creds.ClientID, state, challenge)
+	authURL := AuthorizeURL(creds.ClientID, state, challenge, redirect)
 	if onURL != nil {
 		onURL(authURL)
 	}
@@ -161,15 +198,15 @@ func Login(ctx context.Context, creds config.OAuthCreds, onURL func(string)) (co
 		if res.err != nil {
 			return config.Tokens{}, Team{}, res.err
 		}
-		return Exchange(ctx, creds, res.code, verif)
+		return Exchange(ctx, creds, res.code, verif, redirect)
 	}
 }
 
 // Exchange swaps an authorization code for tokens via oauth.v2.access. Under
 // PKCE the verifier replaces the client secret — Slack rejects the call if both
 // are sent, so exactly one of them goes on the wire.
-func Exchange(ctx context.Context, creds config.OAuthCreds, code, verifier string) (config.Tokens, Team, error) {
-	form := exchangeForm(creds, code, verifier)
+func Exchange(ctx context.Context, creds config.OAuthCreds, code, verifier, redirect string) (config.Tokens, Team, error) {
+	form := exchangeForm(creds, code, verifier, redirect)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, accessURL, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := http.DefaultClient.Do(req)
@@ -182,11 +219,11 @@ func Exchange(ctx context.Context, creds config.OAuthCreds, code, verifier strin
 
 // exchangeForm builds the oauth.v2.access body. Exactly one credential goes on
 // the wire — the verifier under PKCE, the client secret otherwise.
-func exchangeForm(creds config.OAuthCreds, code, verifier string) url.Values {
+func exchangeForm(creds config.OAuthCreds, code, verifier, redirect string) url.Values {
 	form := url.Values{
 		"client_id":    {creds.ClientID},
 		"code":         {code},
-		"redirect_uri": {RedirectURI},
+		"redirect_uri": {redirect},
 	}
 	if verifier != "" {
 		form.Set("code_verifier", verifier)

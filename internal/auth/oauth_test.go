@@ -3,7 +3,12 @@ package auth
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"net"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +17,7 @@ import (
 )
 
 func TestAuthorizeURL(t *testing.T) {
-	u := AuthorizeURL("CID", "STATE", "")
+	u := AuthorizeURL("CID", "STATE", "", "http://localhost:9899/callback")
 	for _, want := range []string{"client_id=CID", "state=STATE", "user_scope=", "redirect_uri=", "users.profile%3Awrite"} {
 		if !strings.Contains(u, want) {
 			t.Errorf("authorize URL missing %q:\n%s", want, u)
@@ -29,7 +34,7 @@ func TestAuthorizeURL(t *testing.T) {
 // PKCE mode must add the challenge and drop the bot scopes — Slack rejects bot
 // scopes on a desktop (loopback) redirect once PKCE is on.
 func TestAuthorizeURLPKCE(t *testing.T) {
-	u := AuthorizeURL("CID", "STATE", "CHAL")
+	u := AuthorizeURL("CID", "STATE", "CHAL", "http://localhost:9899/callback")
 	q, err := url.Parse(u)
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +92,7 @@ func TestExchangeForm(t *testing.T) {
 		{"confidential", "", "client_secret", "code_verifier"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			form := exchangeForm(creds, "CODE", tc.verifier)
+			form := exchangeForm(creds, "CODE", tc.verifier, "http://localhost:9899/callback")
 			if form.Get(tc.wantSet) == "" {
 				t.Errorf("%s not set: %v", tc.wantSet, form)
 			}
@@ -103,7 +108,7 @@ func TestExchangeForm(t *testing.T) {
 
 func TestParseAccess(t *testing.T) {
 	toks, team, err := parseAccess(strings.NewReader(
-		`{"ok":true,"access_token":"xoxb-bot","team":{"id":"T1","name":"Coba"},"authed_user":{"access_token":"xoxp-user"}}`))
+		`{"ok":true,"access_token":"xoxb-bot","team":{"id":"T1","name":"Acme"},"authed_user":{"access_token":"xoxp-user"}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,8 +118,8 @@ func TestParseAccess(t *testing.T) {
 	if toks.Rotating() {
 		t.Errorf("plain grant should not look rotating: %+v", toks)
 	}
-	if team.ID != "T1" || team.Name != "Coba" {
-		t.Errorf("team = %+v, want T1/Coba", team)
+	if team.ID != "T1" || team.Name != "Acme" {
+		t.Errorf("team = %+v, want T1/Acme", team)
 	}
 	if _, _, err := parseAccess(strings.NewReader(`{"ok":false,"error":"invalid_code"}`)); err == nil {
 		t.Error("expected error when ok:false")
@@ -143,5 +148,70 @@ func TestParseAccessRotating(t *testing.T) {
 	}
 	if !toks.Rotating() {
 		t.Error("Rotating() should be true for a refreshable grant")
+	}
+}
+
+// Every port slack-tui may bind has to be registered in the app manifests: a
+// sign-in that falls through to a later port would otherwise die at Slack's
+// redirect check, and only for the user whose 9899 happened to be busy.
+func TestRedirectURIsMatchManifest(t *testing.T) {
+	want := RedirectURIs()
+
+	b, err := os.ReadFile(filepath.Join("..", "..", "slack-app-manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		OAuthConfig struct {
+			RedirectURLs []string `json:"redirect_urls"`
+		} `json:"oauth_config"`
+	}
+	if err := json.Unmarshal(b, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	got := manifest.OAuthConfig.RedirectURLs
+	if len(got) != len(want) {
+		t.Fatalf("manifest lists %d redirect URLs, code uses %d:\n got %v\nwant %v", len(got), len(want), got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("redirect URL %d: manifest %q, code %q", i, got[i], want[i])
+		}
+	}
+
+	// The YAML manifest is the copy most people paste; check it by text rather
+	// than taking on a YAML dependency for one assertion.
+	y, err := os.ReadFile(filepath.Join("..", "..", "slack-app-manifest.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range want {
+		if !strings.Contains(string(y), u) {
+			t.Errorf("slack-app-manifest.yaml is missing %s", u)
+		}
+	}
+}
+
+// A busy port must roll to the next one instead of failing the sign-in.
+func TestListenLoopbackSkipsBusyPort(t *testing.T) {
+	busy, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", portFirst))
+	if err != nil {
+		t.Skipf("port %d already in use by something else: %v", portFirst, err)
+	}
+	defer busy.Close()
+
+	ln, redirect, err := listenLoopback()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	if want := redirectURI(portFirst + 1); redirect != want {
+		t.Errorf("redirect = %q, want %q", redirect, want)
+	}
+	// The URI must describe the socket actually bound — Slack compares the
+	// redirect_uri at authorize time with the one at exchange time.
+	if _, port, _ := net.SplitHostPort(ln.Addr().String()); !strings.Contains(redirect, port) {
+		t.Errorf("redirect %q does not match bound port %s", redirect, port)
 	}
 }

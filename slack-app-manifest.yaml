@@ -44,8 +44,15 @@ features:
     always_online: false
 
 oauth_config:
+  # Loopback targets for `slack-tui login`. It binds the first free port in this
+  # range, so all of them must be registered — Slack matches the redirect URL by
+  # prefix, and the port is part of that prefix.
   redirect_urls:
-    - http://localhost:9899/callback   # loopback target for `slack-tui login`
+    - http://localhost:9899/callback
+    - http://localhost:9900/callback
+    - http://localhost:9901/callback
+    - http://localhost:9902/callback
+    - http://localhost:9903/callback
   scopes:
     user:
       - channels:history

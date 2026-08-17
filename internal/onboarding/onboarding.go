@@ -63,6 +63,7 @@ type Model struct {
 	authSel   int
 	provider  string
 	tokenNote string // why we landed on the paste-a-token screen, when we redirected here
+	teamName  string // real workspace from OAuth; empty for the demo/mock path
 
 	oauthRunning bool   // real browser OAuth in flight
 	oauthErr     string // last OAuth failure, shown on the oauth screen
@@ -143,6 +144,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.oauthErr = msg.err.Error()
 			return m, nil
 		}
+		m.teamName = msg.team.Name
 		_ = config.SaveWorkspace(config.Workspace{
 			Name:   workspaceName(msg.team.Name),
 			TeamID: msg.team.ID,

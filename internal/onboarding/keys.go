@@ -149,7 +149,7 @@ func (m Model) chooseAuth(opt authOpt) (Model, tea.Cmd) {
 		m.oauth = newTypewriter([]tline{
 			{text: "[ oauth ] sign in with Slack", class: "accent"},
 			{text: "opening the authorization page in your browser…", class: "dim"},
-			{text: "  ↳ " + auth.RedirectURI, class: "fill"},
+			{text: "  ↳ " + auth.RedirectURIs()[0], class: "fill"},
 			{text: "waiting for you to approve access in Slack…", class: "ok"},
 		})
 		return m, tea.Batch(tick(m.speedMS()), oauthCmd(creds))

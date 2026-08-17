@@ -70,10 +70,10 @@ No app to create, no credentials to copy, nothing to paste. Sign-in uses
 [PKCE](https://docs.slack.dev/authentication/using-pkce/), the OAuth mode built
 for clients that can't keep a secret, so slack-tui ships only a public client ID
 and the code exchange is proved with a one-time verifier generated on your
-machine. The browser redirect lands on `http://localhost:9899/callback` — the
-token never leaves your laptop. Tokens are stored in
-`~/.config/slack-tui/tokens.json` (0600); env vars (`SLACK_USER_TOKEN`,
-`SLACK_APP_TOKEN`, `SLACK_BOT_TOKEN`) override per-token.
+machine. The browser redirect lands on loopback — `http://localhost:9899/callback`,
+or the next free port up to `9903` — so the token never leaves your laptop.
+Tokens are stored in `~/.config/slack-tui/tokens.json` (0600); env vars
+(`SLACK_USER_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_BOT_TOKEN`) override per-token.
 
 You can also pick **"Sign in with Slack"** in onboarding, or paste a user token
 (`xoxp-…`) directly.
@@ -112,7 +112,11 @@ polling.
   },
   "oauth_config": {
     "redirect_urls": [
-      "http://localhost:9899/callback"
+      "http://localhost:9899/callback",
+      "http://localhost:9900/callback",
+      "http://localhost:9901/callback",
+      "http://localhost:9902/callback",
+      "http://localhost:9903/callback"
     ],
     "scopes": {
       "user": [

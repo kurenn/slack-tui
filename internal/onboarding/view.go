@@ -185,7 +185,7 @@ func (m Model) stage(p theme.Palette) string {
 			lines = []tline{{text: "guest session — pick a display handle for this demo.", class: "dim"}}
 		} else {
 			lines = []tline{
-				{text: "authenticated ✓  ·  workspace @monospace-labs", class: "ok"},
+				{text: "authenticated ✓  ·  workspace @" + m.workspaceLabel(), class: "ok"},
 				{text: "choose how teammates will see you.", class: "dim"},
 			}
 		}
@@ -206,11 +206,20 @@ func (m Model) stage(p theme.Palette) string {
 
 // ── chrome ───────────────────────────────────────────────────────────────────
 
+// workspaceLabel is the real team name once OAuth has told us one, and the demo
+// workspace otherwise — a live sign-in used to be greeted by the mock's name.
+func (m Model) workspaceLabel() string {
+	if m.teamName != "" {
+		return m.teamName
+	}
+	return "monospace-labs"
+}
+
 func (m Model) titlebar(p theme.Palette) string {
 	bg := lipgloss.NewStyle().Background(p.TitlebarBg)
 	dim := bg.Foreground(p.Dim)
 	title := dim.Render("slack-tui — ") + bg.Foreground(p.Fg).Bold(true).Render("onboarding")
-	right := "monospace-labs"
+	right := m.workspaceLabel()
 	if h := m.handle.Value(); h != "" {
 		right = "@" + h
 	}
@@ -231,7 +240,7 @@ func (m Model) statusbar(p theme.Palette) string {
 	}[m.phase]
 	mode := lipgloss.NewStyle().Background(p.Accent).Foreground(p.Bg).Bold(true).Padding(0, 1).Render(label)
 
-	loc := "@monospace-labs"
+	loc := "@" + m.workspaceLabel()
 	if m.phase == phaseWizard {
 		loc = fmt.Sprintf("step %d / %d · %s", m.stepIndex+1, len(wizSteps), m.step())
 	} else if h := m.handle.Value(); h != "" && m.phase != phaseAuth && m.phase != phaseOAuth {

@@ -67,7 +67,7 @@ func TestTallMessageJK(t *testing.T) {
 // TestStatusChangePushesPresence: cycling the Status row advances presence and
 // returns a command to push it to the backend.
 func TestStatusChangePushesPresence(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	isolateConfigDir(t)
 	m := newSized()
 	m.openSettings()
 	m.settingsSel = 3 // status row
@@ -82,7 +82,7 @@ func TestStatusChangePushesPresence(t *testing.T) {
 }
 
 func TestSettingsPanel(t *testing.T) {
-	t.Setenv("HOME", t.TempDir()) // keep config.Save off the real config dir
+	isolateConfigDir(t)
 	m := newSized()
 	m.openSettings()
 	if !m.settingsOpen {
@@ -284,7 +284,7 @@ func TestApplySentReplyDedupe(t *testing.T) {
 	m := newSized()
 	root := data.Message{ID: "root", UserID: m.ws.MeID, Text: "q",
 		Replies: []data.Reply{
-			{ID: "real", UserID: m.ws.MeID, Text: "hi"},     // live event already landed it
+			{ID: "real", UserID: m.ws.MeID, Text: "hi"},      // live event already landed it
 			{ID: "pending-1", UserID: m.ws.MeID, Text: "hi"}, // our optimistic copy
 		}}
 	m.messages[m.activeID] = append(m.messages[m.activeID], root)
@@ -1228,4 +1228,15 @@ func TestDMPollBoundedAndRotates(t *testing.T) {
 	if len(covered) != 158 {
 		t.Fatalf("rotation starved some DMs: covered %d/158", len(covered))
 	}
+}
+
+// isolateConfigDir points config.Dir() at a temp dir for the duration of a test.
+// Overriding only HOME is not enough: config.Dir() checks XDG_CONFIG_HOME first,
+// so on any desktop that sets it (most Linux distros) the test would read and
+// write the real ~/.config/slack-tui.
+func isolateConfigDir(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
 }

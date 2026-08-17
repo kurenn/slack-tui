@@ -224,7 +224,7 @@ func TestTrainerCompletesAllDrills(t *testing.T) {
 }
 
 func TestFinishEmitsPrefs(t *testing.T) {
-	t.Setenv("HOME", t.TempDir()) // keep config.Save off the real config dir
+	isolateConfigDir(t)
 	m := Goto(WithSize(New(), 100, 30), phaseLaunch)
 	m.themeName = "midnight"
 	m.accent = "purple"
@@ -242,4 +242,15 @@ func TestFinishEmitsPrefs(t *testing.T) {
 	if fin.Prefs.Theme != "midnight" || fin.Prefs.Handle != "devon" || !fin.Prefs.Onboarded {
 		t.Errorf("prefs = %+v", fin.Prefs)
 	}
+}
+
+// isolateConfigDir points config.Dir() at a temp dir for the duration of a test.
+// Overriding only HOME is not enough: config.Dir() checks XDG_CONFIG_HOME first,
+// so on any desktop that sets it (most Linux distros) the test would read and
+// write the real ~/.config/slack-tui.
+func isolateConfigDir(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
 }

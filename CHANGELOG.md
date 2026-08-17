@@ -3,7 +3,7 @@
 slack-tui follows semver-ish tags; every release ships binaries for
 macOS/Linux/Windows plus a Homebrew formula via goreleaser.
 
-## Unreleased
+## v0.5.3
 
 - **Read state now actually reaches Slack** — `conversations.mark` needs a
   `*:write` scope per conversation kind, and only `channels:write` was ever

@@ -9,11 +9,21 @@ import (
 
 // Tokens holds one workspace's Slack credentials. User is required for real
 // Slack; App + Bot enable Socket Mode (live channel unread).
+//
+// Refresh and ExpiresAt are set only when Slack hands back a rotating user
+// token. Nothing refreshes them yet — they exist so a rotating token is
+// recorded and reported rather than silently expiring mid-session. Rotation is
+// off for the loopback + PKCE flow we use, so these stay empty in practice.
 type Tokens struct {
-	User string `json:"user"`
-	App  string `json:"app,omitempty"`
-	Bot  string `json:"bot,omitempty"`
+	User      string `json:"user"`
+	App       string `json:"app,omitempty"`
+	Bot       string `json:"bot,omitempty"`
+	Refresh   string `json:"refresh,omitempty"`
+	ExpiresAt int64  `json:"expires_at,omitempty"` // unix seconds; 0 = never
 }
+
+// Rotating reports whether Slack issued this token with an expiry.
+func (t Tokens) Rotating() bool { return t.Refresh != "" || t.ExpiresAt > 0 }
 
 // Workspace is one signed-in workspace: a name to switch by, the Slack team
 // id, and its credentials.

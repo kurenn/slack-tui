@@ -356,6 +356,9 @@ func (m Model) viewTokenForm(p theme.Palette) string {
 		m.tlineRender(p, tline{text: "authenticate with access tokens", class: "fg"}),
 		m.tlineRender(p, tline{text: "user token is required; app + bot tokens enable live channel unread (optional).", class: "dim"}),
 	}
+	if m.tokenNote != "" {
+		head = append(head, m.tlineRender(p, tline{text: m.tokenNote, class: "warn"}))
+	}
 	labels := []string{"user token (xoxp):", "app token  (xapp):", "bot token  (xoxb):"}
 	views := []string{m.token.View(), m.appToken.View(), m.botToken.View()}
 	var rows []string
@@ -394,6 +397,8 @@ func (m Model) tlineRender(p theme.Palette, l tline) string {
 		s = s.Foreground(p.Accent).Bold(true)
 	case "ok":
 		s = s.Foreground(p.Green)
+	case "warn":
+		s = s.Foreground(p.Yellow)
 	case "fill":
 		s = s.Foreground(p.Dim2)
 	case "dim":

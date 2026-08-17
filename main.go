@@ -105,15 +105,17 @@ func main() {
 func login() error {
 	creds := config.LoadOAuthCreds()
 	if !creds.Ready() {
-		return fmt.Errorf("missing app credentials — set SLACK_CLIENT_ID and SLACK_CLIENT_SECRET " +
-			"(from your Slack app's Basic Information), or put them in ~/.config/slack-tui/oauth.json")
+		return fmt.Errorf("missing app credentials — this build has no built-in Slack app, so set " +
+			"SLACK_CLIENT_ID (from your own Slack app's Basic Information), or put it in " +
+			"~/.config/slack-tui/oauth.json")
 	}
 	fmt.Println("Opening your browser to authorize slack-tui…")
-	fmt.Printf("If it doesn't open, visit:\n  %s\n\n", auth.AuthorizeURL(creds.ClientID, "manual"))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	toks, team, err := auth.Login(ctx, creds)
+	toks, team, err := auth.Login(ctx, creds, func(u string) {
+		fmt.Printf("If it doesn't open, visit:\n  %s\n\n", u)
+	})
 	if err != nil {
 		return err
 	}
@@ -121,13 +123,17 @@ func login() error {
 	if name == "" {
 		name = "default"
 	}
-	ws := config.Workspace{Name: name, TeamID: team.ID, Tokens: config.Tokens{User: toks.User, Bot: toks.Bot}}
+	ws := config.Workspace{Name: name, TeamID: team.ID, Tokens: toks}
 	if err := config.SaveWorkspace(ws); err != nil { // upserts; keeps a stored xapp token for this team
 		return err
 	}
 	fmt.Printf("✓ Signed in to %s — saved as workspace %q (now active). Run `slack-tui` to start.\n", team.Name, name)
 	if all, _, _ := config.LoadWorkspaces(); len(all) > 1 {
 		fmt.Println("  Switch workspaces in-app via Ctrl-K → \"Switch workspace\", or `slack-tui --workspace <name>`.")
+	}
+	if toks.Rotating() {
+		fmt.Println("  ! Slack issued a rotating user token — slack-tui can't refresh it yet, so you'll")
+		fmt.Println("    need to run `slack-tui login` again when it expires. Please report this.")
 	}
 	fmt.Println("  (For live channel unread, also provide an app-level xapp token — OAuth can't issue it.)")
 	return nil

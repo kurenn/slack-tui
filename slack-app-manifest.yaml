@@ -9,7 +9,11 @@
 #   5. In Slack, `/invite @slack-tui` in any channel you want live (Socket Mode
 #      only streams channels/DMs the app is a member of; personal DMs are polled).
 #
-# Two ways to get the user/bot tokens:
+# You only need your own app for Socket Mode (live unread) or if you'd rather not
+# use the published slack-tui app — a plain install signs in with `slack-tui
+# login` out of the box, no app and no credentials required.
+#
+# Two ways to get the user/bot tokens from your own app:
 #   A) Browser sign-in (recommended): Basic Information → copy the Client ID and
 #      Client Secret into env (SLACK_CLIENT_ID / SLACK_CLIENT_SECRET) or
 #      ~/.config/slack-tui/oauth.json, then run `slack-tui login` (or pick
@@ -20,6 +24,14 @@
 #
 # The app-level token (xapp-…, step 3) is for Socket Mode only and is never issued
 # by OAuth — provide it via SLACK_APP_TOKEN or the onboarding token form.
+#
+# Deliberately NO `pkce_enabled: true` here, though the published slack-tui app
+# does set it. PKCE turns the app into a public client (no client secret), but
+# Slack then treats the loopback redirect as a desktop redirect, and desktop
+# redirects may not request bot scopes — which kills Socket Mode, the main reason
+# to run your own app. It is also a one-way switch: it cannot be turned off
+# without contacting Slack support. Omit the client secret and slack-tui runs
+# PKCE against this app anyway; supply the secret and it keeps the bot scopes.
 
 display_information:
   name: slack-tui

@@ -15,8 +15,13 @@ builds:
     ignore:
       - goos: windows
         goarch: arm64
+    # SLACK_APP_CLIENT_ID stamps the published app's client ID so a plain install
+    # can sign in with nothing configured. It is NOT a secret — the shipped flow
+    # is PKCE, which is precisely the OAuth mode for clients that cannot keep
+    # one. Unset (forks, local `goreleaser release --snapshot`) it stays empty
+    # and those builds fall back to a user-supplied app in oauth.json.
     ldflags:
-      - -s -w -X main.version={{.Version}}
+      - -s -w -X main.version={{.Version}} -X github.com/kurenn/slack-tui/internal/config.DefaultClientID={{ envOrDefault "SLACK_APP_CLIENT_ID" "" }}
 
 archives:
   - formats: [tar.gz]

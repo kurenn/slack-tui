@@ -62,6 +62,33 @@ slack-tui          # no token? you get a mock workspace to play with
 
 ## Connect to Slack
 
+```sh
+slack-tui login    # opens your browser, and that's the whole setup
+```
+
+No app to create, no credentials to copy, nothing to paste. Sign-in uses
+[PKCE](https://docs.slack.dev/authentication/using-pkce/), the OAuth mode built
+for clients that can't keep a secret, so slack-tui ships only a public client ID
+and the code exchange is proved with a one-time verifier generated on your
+machine. The browser redirect lands on `http://localhost:9899/callback` — the
+token never leaves your laptop. Tokens are stored in
+`~/.config/slack-tui/tokens.json` (0600); env vars (`SLACK_USER_TOKEN`,
+`SLACK_APP_TOKEN`, `SLACK_BOT_TOKEN`) override per-token.
+
+You can also pick **"Sign in with Slack"** in onboarding, or paste a user token
+(`xoxp-…`) directly.
+
+> Some workspaces require an admin to approve third-party apps. If sign-in comes
+> back denied, that's the wall you hit — ask an admin to approve slack-tui, or
+> use your own app (below).
+
+### Bring your own Slack app
+
+Optional, and needed for exactly one thing: **Socket Mode live unread**. Slack
+forbids bot scopes on the PKCE desktop flow, so the built-in app gets a user
+token only — everything works except the live unread stream, which falls back to
+polling.
+
 1. Create a Slack app from the manifest below
    (api.slack.com/apps → *Create New App* → *From a manifest* → paste it).
    It's also in the repo as [JSON](slack-app-manifest.json) and
@@ -143,16 +170,17 @@ slack-tui          # no token? you get a mock workspace to play with
 
 </details>
 
-2. Sign in with your browser:
+2. Sign in against it with your browser — *Basic Information* → *App
+   Credentials*:
 
 ```sh
 SLACK_CLIENT_ID=… SLACK_CLIENT_SECRET=… slack-tui login
 ```
 
-…or pick **"Sign in with Slack"** in onboarding, or paste a user token
-(`xoxp-…`) directly. Tokens are stored in `~/.config/slack-tui/tokens.json`
-(0600). Env vars (`SLACK_USER_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_BOT_TOKEN`)
-override per-token.
+Supplying a **secret** is what selects your app's confidential flow and keeps
+the bot scopes. Give only `SLACK_CLIENT_ID` and slack-tui runs PKCE against your
+app instead — user token only, same as the built-in app. Either can also live in
+`~/.config/slack-tui/oauth.json`.
 
 Run `slack-tui doctor` to diagnose your setup — it reports which tokens are
 in use (and warns when a stale env var overrides `tokens.json`), checks

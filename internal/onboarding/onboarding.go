@@ -60,8 +60,9 @@ type Model struct {
 	botToken   textinput.Model // bot token (xoxb) — Socket Mode
 	tokenField int             // which token input is focused (0=user,1=app,2=bot)
 
-	authSel  int
-	provider string
+	authSel   int
+	provider  string
+	tokenNote string // why we landed on the paste-a-token screen, when we redirected here
 
 	oauthRunning bool   // real browser OAuth in flight
 	oauthErr     string // last OAuth failure, shown on the oauth screen
@@ -145,7 +146,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		_ = config.SaveWorkspace(config.Workspace{
 			Name:   workspaceName(msg.team.Name),
 			TeamID: msg.team.ID,
-			Tokens: config.Tokens{User: msg.toks.User, Bot: msg.toks.Bot},
+			Tokens: msg.toks,
 		}) // SaveWorkspace keeps any stored app (xapp) token for this team
 		m.phase = phaseIdentity
 		return m, m.handle.Focus()

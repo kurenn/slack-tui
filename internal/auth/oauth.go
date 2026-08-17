@@ -2,11 +2,24 @@
 // a loopback HTTP server catches the redirect, then the code is exchanged for
 // tokens. The app-level token (xapp) for Socket Mode is NOT issued by OAuth —
 // it's a static token from the app's admin page.
+//
+// Two modes share one code path, picked by whether we hold a client secret:
+//
+//   - PKCE (public client) — the shipped app. No secret is involved: we send a
+//     code_challenge on the way out and the code_verifier on the way back, so
+//     the binary carries nothing worth extracting. Slack treats a loopback
+//     redirect as a desktop redirect once PKCE is on, and desktop redirects
+//     may not request bot scopes — so this mode asks for user scopes only.
+//   - Confidential — a user's own app, with client_id + client_secret in
+//     oauth.json. Keeps bot scopes, which is the only way to get an xoxb token
+//     for Socket Mode.
 package auth
 
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -17,6 +30,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/kurenn/slack-tui/internal/config"
 )
@@ -49,24 +63,60 @@ var (
 	}
 )
 
-// AuthorizeURL builds the consent URL for the given app + state.
-func AuthorizeURL(clientID, state string) string {
-	return authorizeURL + "?" + url.Values{
+// AuthorizeURL builds the consent URL for the given app + state. A non-empty
+// challenge switches the request to PKCE, which also drops the bot scopes:
+// Slack rejects them on desktop (loopback) redirects once PKCE is enabled.
+func AuthorizeURL(clientID, state, challenge string) string {
+	v := url.Values{
 		"client_id":    {clientID},
-		"scope":        {strings.Join(BotScopes, ",")},
 		"user_scope":   {strings.Join(UserScopes, ",")},
 		"redirect_uri": {RedirectURI},
 		"state":        {state},
-	}.Encode()
+	}
+	if challenge != "" {
+		v.Set("code_challenge", challenge)
+		v.Set("code_challenge_method", "S256")
+	} else {
+		v.Set("scope", strings.Join(BotScopes, ","))
+	}
+	return authorizeURL + "?" + v.Encode()
+}
+
+// verifier is a PKCE code_verifier: 32 random bytes, base64url without padding
+// (RFC 7636 allows 43–128 chars from the unreserved set; this yields 43).
+func verifier() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// challengeFor derives the S256 code_challenge from a verifier.
+func challengeFor(v string) string {
+	sum := sha256.Sum256([]byte(v))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 // Login runs the full flow: starts the loopback server, opens the browser, waits
 // for the redirect, and exchanges the code for tokens. The bot token is merged
 // into the result; the caller keeps any existing app (xapp) token.
-func Login(ctx context.Context, creds config.OAuthCreds) (config.Tokens, Team, error) {
+//
+// onURL, when non-nil, receives the authorization URL actually used — state and
+// PKCE challenge included — so callers can offer it as a manual fallback when
+// the browser doesn't open. Printing a separately-built URL would fail the
+// state check, and under PKCE the challenge too.
+func Login(ctx context.Context, creds config.OAuthCreds, onURL func(string)) (config.Tokens, Team, error) {
 	state, err := randHex()
 	if err != nil {
 		return config.Tokens{}, Team{}, err
+	}
+	var verif, challenge string
+	if creds.PKCE() {
+		if verif, err = verifier(); err != nil {
+			return config.Tokens{}, Team{}, err
+		}
+		challenge = challengeFor(verif)
 	}
 	ln, err := net.Listen("tcp", listenAddr)
 	if err != nil {
@@ -98,8 +148,11 @@ func Login(ctx context.Context, creds config.OAuthCreds) (config.Tokens, Team, e
 	go func() { _ = srv.Serve(ln) }()
 	defer srv.Shutdown(context.Background())
 
-	authURL := AuthorizeURL(creds.ClientID, state)
-	_ = openBrowser(authURL) // non-fatal; the URL is also printed by callers
+	authURL := AuthorizeURL(creds.ClientID, state, challenge)
+	if onURL != nil {
+		onURL(authURL)
+	}
+	_ = openBrowser(authURL) // non-fatal; callers offer the URL via onURL
 
 	select {
 	case <-ctx.Done():
@@ -108,18 +161,16 @@ func Login(ctx context.Context, creds config.OAuthCreds) (config.Tokens, Team, e
 		if res.err != nil {
 			return config.Tokens{}, Team{}, res.err
 		}
-		return Exchange(ctx, creds, res.code)
+		return Exchange(ctx, creds, res.code, verif)
 	}
 }
 
-// Exchange swaps an authorization code for tokens via oauth.v2.access.
-func Exchange(ctx context.Context, creds config.OAuthCreds, code string) (config.Tokens, Team, error) {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, accessURL, strings.NewReader(url.Values{
-		"client_id":     {creds.ClientID},
-		"client_secret": {creds.ClientSecret},
-		"code":          {code},
-		"redirect_uri":  {RedirectURI},
-	}.Encode()))
+// Exchange swaps an authorization code for tokens via oauth.v2.access. Under
+// PKCE the verifier replaces the client secret — Slack rejects the call if both
+// are sent, so exactly one of them goes on the wire.
+func Exchange(ctx context.Context, creds config.OAuthCreds, code, verifier string) (config.Tokens, Team, error) {
+	form := exchangeForm(creds, code, verifier)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, accessURL, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -127,6 +178,22 @@ func Exchange(ctx context.Context, creds config.OAuthCreds, code string) (config
 	}
 	defer resp.Body.Close()
 	return parseAccess(resp.Body)
+}
+
+// exchangeForm builds the oauth.v2.access body. Exactly one credential goes on
+// the wire — the verifier under PKCE, the client secret otherwise.
+func exchangeForm(creds config.OAuthCreds, code, verifier string) url.Values {
+	form := url.Values{
+		"client_id":    {creds.ClientID},
+		"code":         {code},
+		"redirect_uri": {RedirectURI},
+	}
+	if verifier != "" {
+		form.Set("code_verifier", verifier)
+	} else {
+		form.Set("client_secret", creds.ClientSecret)
+	}
+	return form
 }
 
 // Team identifies the workspace the user just authorized.
@@ -142,6 +209,12 @@ type accessResponse struct {
 	Team        Team   `json:"team"`
 	AuthedUser  struct {
 		AccessToken string `json:"access_token"` // user token (xoxp)
+		// Present only when Slack issues a rotating token. Enabling PKCE caps
+		// refresh tokens at 30 days, and forces rotation outright for custom
+		// URI schemes — loopback redirects with rotation off should stay
+		// non-expiring, but Slack decides, so we record what we were handed.
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int64  `json:"expires_in"` // seconds
 	} `json:"authed_user"`
 }
 
@@ -156,8 +229,19 @@ func parseAccess(r io.Reader) (config.Tokens, Team, error) {
 	if out.AuthedUser.AccessToken == "" {
 		return config.Tokens{}, Team{}, fmt.Errorf("oauth: no user token granted (check user_scope)")
 	}
-	return config.Tokens{User: out.AuthedUser.AccessToken, Bot: out.AccessToken}, out.Team, nil
+	toks := config.Tokens{
+		User:    out.AuthedUser.AccessToken,
+		Bot:     out.AccessToken,
+		Refresh: out.AuthedUser.RefreshToken,
+	}
+	if out.AuthedUser.ExpiresIn > 0 {
+		toks.ExpiresAt = now().Unix() + out.AuthedUser.ExpiresIn
+	}
+	return toks, out.Team, nil
 }
+
+// now is swapped in tests to keep expiry math deterministic.
+var now = time.Now
 
 func randHex() (string, error) {
 	b := make([]byte, 16)

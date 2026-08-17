@@ -132,22 +132,27 @@ func (m Model) chooseAuth(opt authOpt) (Model, tea.Cmd) {
 		m.phase = phaseIdentity
 		return m, m.handle.Focus()
 	case "slack":
-		if creds := config.LoadOAuthCreds(); creds.Ready() {
-			m.phase = phaseOAuth
-			m.oauthRunning = true
-			m.oauthErr = ""
-			m.oauth = newTypewriter([]tline{
-				{text: "[ oauth ] sign in with Slack", class: "accent"},
-				{text: "opening the authorization page in your browser…", class: "dim"},
-				{text: "  ↳ " + auth.RedirectURI, class: "fill"},
-				{text: "waiting for you to approve access in Slack…", class: "ok"},
-			})
-			return m, tea.Batch(tick(m.speedMS()), oauthCmd(creds))
+		creds := config.LoadOAuthCreds()
+		if !creds.Ready() {
+			// No built-in app in this build and none configured — the paste-a-token
+			// screen is the only way through, so say so instead of silently
+			// swapping the screen out from under the choice just made.
+			m.provider = "token"
+			m.phase = phaseToken
+			m.tokenNote = "This build has no Slack app to sign in with — paste a token, " +
+				"or set a client ID in ~/.config/slack-tui/oauth.json."
+			return m, m.focusToken(0)
 		}
-		// No app credentials configured — fall back to pasting a token.
-		m.provider = "token"
-		m.phase = phaseToken
-		return m, m.focusToken(0)
+		m.phase = phaseOAuth
+		m.oauthRunning = true
+		m.oauthErr = ""
+		m.oauth = newTypewriter([]tline{
+			{text: "[ oauth ] sign in with Slack", class: "accent"},
+			{text: "opening the authorization page in your browser…", class: "dim"},
+			{text: "  ↳ " + auth.RedirectURI, class: "fill"},
+			{text: "waiting for you to approve access in Slack…", class: "ok"},
+		})
+		return m, tea.Batch(tick(m.speedMS()), oauthCmd(creds))
 	default: // sso (simulated)
 		m.phase = phaseOAuth
 		m.oauth = newTypewriter(oauthLines(opt.id))
@@ -165,7 +170,7 @@ func oauthCmd(creds config.OAuthCreds) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
-		toks, team, err := auth.Login(ctx, creds)
+		toks, team, err := auth.Login(ctx, creds, nil)
 		return oauthDoneMsg{toks: toks, team: team, err: err}
 	}
 }

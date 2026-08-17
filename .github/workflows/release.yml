@@ -68,6 +68,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # Public client ID of the published slack-tui app, baked into release
+          # binaries so `slack-tui login` works with no setup. A variable, not a
+          # secret: PKCE means there is no paired secret, and masking it would
+          # only obscure the build log.
+          SLACK_APP_CLIENT_ID: ${{ vars.SLACK_APP_CLIENT_ID }}
 
   # Reports on the formula alone, so "binaries shipped" and "brew users got the
   # update" are two separate signals in the checks list.

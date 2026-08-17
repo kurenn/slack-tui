@@ -8,7 +8,46 @@ permissions:
   contents: write
 
 jobs:
+  # The Homebrew formula lives in another repo, so goreleaser pushes it with a
+  # PAT (HOMEBREW_TAP_TOKEN) instead of GITHUB_TOKEN. When that PAT expires,
+  # goreleaser fails on its *last* step — after the GitHub release and every
+  # binary are already published. v0.5.2 and v0.5.3 both shipped correctly and
+  # still reported red, so the real problem went unnoticed and the tap sat on
+  # v0.5.1 for two releases.
+  #
+  # Checking the credential up front turns that into: binaries ship, the
+  # goreleaser job goes green, and a job named `homebrew` fails loudly with the
+  # actual cause. A 200 here proves the token can still see the tap, not that
+  # it has contents:write — but expiry/revocation (401) is the failure that
+  # actually happens.
+  tap-credentials:
+    runs-on: ubuntu-latest
+    outputs:
+      valid: ${{ steps.check.outputs.valid }}
+      reason: ${{ steps.check.outputs.reason }}
+    steps:
+      - id: check
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "valid=false" >> "$GITHUB_OUTPUT"
+            echo "reason=HOMEBREW_TAP_TOKEN secret is not set" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $HOMEBREW_TAP_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/kurenn/homebrew-tap)
+          if [ "$code" = "200" ]; then
+            echo "valid=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "valid=false" >> "$GITHUB_OUTPUT"
+            echo "reason=HOMEBREW_TAP_TOKEN cannot read kurenn/homebrew-tap (HTTP $code — expired or revoked?)" >> "$GITHUB_OUTPUT"
+          fi
+
   goreleaser:
+    needs: tap-credentials
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -18,10 +57,43 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go test ./...
+      # A dead tap token drops --skip=homebrew rather than blocking the release:
+      # binaries are the point, the formula is downstream of them. Both branches
+      # spell out the full args on purpose — an Actions ternary whose "true" arm
+      # is '' falls through to the "false" arm, since '' is falsy.
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
-          args: release --clean
+          args: ${{ needs.tap-credentials.outputs.valid == 'true' && 'release --clean' || 'release --clean --skip=homebrew' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+  # Reports on the formula alone, so "binaries shipped" and "brew users got the
+  # update" are two separate signals in the checks list.
+  homebrew:
+    needs: [tap-credentials, goreleaser]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report formula status
+        env:
+          VALID: ${{ needs.tap-credentials.outputs.valid }}
+          REASON: ${{ needs.tap-credentials.outputs.reason }}
+        run: |
+          if [ "$VALID" = "true" ]; then
+            echo "✓ formula pushed to kurenn/homebrew-tap" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "### Homebrew formula NOT updated"
+            echo
+            echo "$REASON"
+            echo
+            echo "The release itself succeeded — binaries and checksums are attached to the tag."
+            echo "Only \`brew install kurenn/tap/slack-tui\` is stale."
+            echo
+            echo "Fix: issue a fine-grained PAT with **contents: write** on \`kurenn/homebrew-tap\`,"
+            echo "set it as the \`HOMEBREW_TAP_TOKEN\` secret on this repo, then re-run this workflow."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error title=Homebrew formula not updated::$REASON — the release itself succeeded; see the job summary"
+          exit 1

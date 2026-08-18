@@ -45,6 +45,13 @@ func main() {
 	if len(os.Args) >= 2 && (os.Args[1] == "doctor" || os.Args[1] == "--doctor") {
 		os.Exit(doctor.Run(versionString()))
 	}
+	if len(os.Args) >= 2 && os.Args[1] == "setup" {
+		if err := setup(); err != nil {
+			fmt.Fprintln(os.Stderr, "setup:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) >= 2 && os.Args[1] == "login" {
 		if err := login(); err != nil {
 			fmt.Fprintln(os.Stderr, "login:", err)
@@ -105,9 +112,8 @@ func main() {
 func login() error {
 	creds := config.LoadOAuthCreds()
 	if !creds.Ready() {
-		return fmt.Errorf("missing app credentials — this build has no built-in Slack app, so set " +
-			"SLACK_CLIENT_ID (from your own Slack app's Basic Information), or put it in " +
-			"~/.config/slack-tui/oauth.json")
+		return fmt.Errorf("no Slack app configured — run `slack-tui setup`, which walks you " +
+			"through creating one (or set SLACK_CLIENT_ID if you already have its client ID)")
 	}
 	if creds.ClientSecret != "" {
 		fmt.Println("note: a client secret is configured but no longer used — Slack requires PKCE")

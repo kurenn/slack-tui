@@ -274,6 +274,10 @@ func randHex() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// OpenBrowser launches the user's default browser. Exported so the setup
+// command can reuse it instead of keeping a second copy of the per-OS table.
+func OpenBrowser(u string) error { return openBrowser(u) }
+
 func openBrowser(u string) error {
 	switch runtime.GOOS {
 	case "darwin":

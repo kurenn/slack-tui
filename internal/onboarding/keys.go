@@ -139,8 +139,8 @@ func (m Model) chooseAuth(opt authOpt) (Model, tea.Cmd) {
 			// swapping the screen out from under the choice just made.
 			m.provider = "token"
 			m.phase = phaseToken
-			m.tokenNote = "This build has no Slack app to sign in with — paste a token, " +
-				"or set a client ID in ~/.config/slack-tui/oauth.json."
+			m.tokenNote = "No Slack app configured — quit and run `slack-tui setup` to create " +
+				"one in ~2 min, or paste a token below."
 			return m, m.focusToken(0)
 		}
 		m.phase = phaseOAuth

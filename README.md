@@ -92,7 +92,22 @@ expire and is never refreshed.
 > back denied, that's the wall you hit — ask an admin to approve slack-tui, or
 > use your own app (below).
 
-### Socket Mode (live unread) — and bringing your own app
+### Bring your own Slack app
+
+Not required if you're using a build with an app baked in, and the one reason
+you'd want to is **Socket Mode live unread** (below). One command does the whole
+thing:
+
+```sh
+slack-tui setup
+```
+
+It puts the app manifest on your clipboard, opens api.slack.com/apps, asks for
+the Client ID once you've created the app, saves it, and signs you straight in.
+About two minutes, and there's no client secret anywhere in it — sign-in is
+PKCE, which never uses one.
+
+### Socket Mode (live unread)
 
 Sign-in gets you a **user token**, and that runs everything except the live
 unread stream, which falls back to polling without one.
@@ -105,6 +120,8 @@ and pasted into onboarding or set as `SLACK_APP_TOKEN` / `SLACK_BOT_TOKEN`.
 
 That's the only reason to create your own app. If you don't need live unread,
 you never need one.
+
+Prefer to do it by hand, or want to see what `setup` does?
 
 1. Create a Slack app from the manifest below
    (api.slack.com/apps → *Create New App* → *From a manifest* → paste it).

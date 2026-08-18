@@ -14,8 +14,8 @@ func TestLoadOAuthCredsFallsBackToBuiltIn(t *testing.T) {
 	if got.ClientID != "CBUILTIN" {
 		t.Errorf("clientID = %q, want the built-in app", got.ClientID)
 	}
-	if !got.PKCE() || !got.Ready() {
-		t.Errorf("built-in app should be a ready PKCE client, got %+v", got)
+	if !got.Ready() {
+		t.Errorf("built-in app should be ready to sign in, got %+v", got)
 	}
 }
 
@@ -32,8 +32,9 @@ func TestLoadOAuthCredsUnconfigured(t *testing.T) {
 	}
 }
 
-// A user's own app keeps the confidential flow — that's the only way to be
-// granted the bot scopes Socket Mode needs.
+// A user's own app wins over the built-in one. The secret is still parsed (so a
+// pre-existing oauth.json loads, and login can say it is now ignored) but it is
+// never sent — see TestExchangeFormNeverSendsSecret.
 func TestLoadOAuthCredsUserAppKeepsSecret(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("SLACK_CLIENT_ID", "")
@@ -46,9 +47,6 @@ func TestLoadOAuthCredsUserAppKeepsSecret(t *testing.T) {
 	got := LoadOAuthCreds()
 	if got.ClientID != "CMINE" || got.ClientSecret != "SHH" {
 		t.Errorf("got %+v, want the user's own app", got)
-	}
-	if got.PKCE() {
-		t.Error("an app with a secret should use the confidential flow")
 	}
 }
 
@@ -72,10 +70,11 @@ func TestLoadOAuthCredsEnvIDDropsStoredSecret(t *testing.T) {
 		t.Errorf("stored secret must not follow a different client ID, got %q", got.ClientSecret)
 	}
 
-	// …but an env secret alongside it still selects the confidential flow.
+	// An env secret is still read (so it can be reported as unused), never dropped
+	// silently into a mismatched pairing.
 	t.Setenv("SLACK_CLIENT_SECRET", "ENVSECRET")
-	if got := LoadOAuthCreds(); got.PKCE() || got.ClientSecret != "ENVSECRET" {
-		t.Errorf("got %+v, want the env secret honoured", got)
+	if got := LoadOAuthCreds(); got.ClientSecret != "ENVSECRET" {
+		t.Errorf("got %+v, want the env secret read", got)
 	}
 }
 

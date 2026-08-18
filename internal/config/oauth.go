@@ -22,9 +22,10 @@ var DefaultClientID = ""
 // (from the app's Basic Information page). They're separate from the issued
 // tokens — these identify the app, the tokens authenticate the user.
 //
-// A secret is optional. Without one we run PKCE as a public client (the shipped
-// path); with one we run the confidential flow, which is the only way to be
-// granted bot scopes for Socket Mode.
+// Only the client ID is used. Sign-in is always PKCE, because Slack rejects a
+// loopback redirect without it, and a PKCE client must not send a secret at
+// all. ClientSecret is still parsed so a pre-existing oauth.json keeps loading
+// and we can tell the user their secret is now ignored.
 type OAuthCreds struct {
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret,omitempty"`
@@ -32,9 +33,6 @@ type OAuthCreds struct {
 
 // Ready reports whether a browser sign-in can be attempted at all.
 func (c OAuthCreds) Ready() bool { return c.ClientID != "" }
-
-// PKCE reports whether to run the public-client flow (no secret to send).
-func (c OAuthCreds) PKCE() bool { return c.ClientSecret == "" }
 
 // LoadOAuthCreds reads app credentials from oauth.json, falling back to the
 // built-in app, with env vars (SLACK_CLIENT_ID / SLACK_CLIENT_SECRET)

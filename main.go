@@ -109,6 +109,10 @@ func login() error {
 			"SLACK_CLIENT_ID (from your own Slack app's Basic Information), or put it in " +
 			"~/.config/slack-tui/oauth.json")
 	}
+	if creds.ClientSecret != "" {
+		fmt.Println("note: a client secret is configured but no longer used — Slack requires PKCE")
+		fmt.Println("      for loopback redirects, and a PKCE client must not send one. Safe to remove.")
+	}
 	fmt.Println("Opening your browser to authorize slack-tui…")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -135,6 +139,7 @@ func login() error {
 		fmt.Println("  ! Slack issued a rotating user token — slack-tui can't refresh it yet, so you'll")
 		fmt.Println("    need to run `slack-tui login` again when it expires. Please report this.")
 	}
-	fmt.Println("  (For live channel unread, also provide an app-level xapp token — OAuth can't issue it.)")
+	fmt.Println("  (For live channel unread, provide the app-level xapp AND bot xoxb tokens from your")
+	fmt.Println("   app's admin page — Slack issues neither through a loopback sign-in.)")
 	return nil
 }

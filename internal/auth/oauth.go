@@ -3,16 +3,17 @@
 // tokens. The app-level token (xapp) for Socket Mode is NOT issued by OAuth —
 // it's a static token from the app's admin page.
 //
-// Two modes share one code path, picked by whether we hold a client secret:
+// The flow is always PKCE, for every app. Slack classifies a loopback redirect
+// as a "non-web URI" and rejects it outright without a code_challenge — "Must
+// use PKCE to redirect to a non-web URI" — so a client secret buys nothing
+// here; there is no confidential variant to fall back to. Verified against a
+// live app with the pkce_enabled setting still off, so the wire protocol is
+// what matters, not the app toggle.
 //
-//   - PKCE (public client) — the shipped app. No secret is involved: we send a
-//     code_challenge on the way out and the code_verifier on the way back, so
-//     the binary carries nothing worth extracting. Slack treats a loopback
-//     redirect as a desktop redirect once PKCE is on, and desktop redirects
-//     may not request bot scopes — so this mode asks for user scopes only.
-//   - Confidential — a user's own app, with client_id + client_secret in
-//     oauth.json. Keeps bot scopes, which is the only way to get an xoxb token
-//     for Socket Mode.
+// The same rule bars bot scopes: "Bot scopes are not allowed when redirecting
+// to a non-web URI." No xoxb token can be issued through this flow by any app,
+// so Socket Mode users copy the bot token from the app admin page by hand,
+// exactly as they already do for the app-level (xapp) token.
 package auth
 
 import (
@@ -81,7 +82,9 @@ func listenLoopback() (net.Listener, string, error) {
 		portFirst, portFirst+portCount-1, lastErr)
 }
 
-// UserScopes / BotScopes mirror slack-app-manifest.yaml.
+// UserScopes mirrors the user scopes in slack-app-manifest.yaml. There is no
+// BotScopes counterpart: Slack refuses bot scopes on a loopback redirect, so
+// requesting them fails the whole authorization.
 var (
 	// The four *:write scopes below are what conversations.mark needs — one per
 	// conversation kind. Without groups/im/mpim:write, marking read succeeds for
@@ -94,29 +97,20 @@ var (
 		"users:read", "chat:write", "files:read", "files:write", "reactions:read", "reactions:write",
 		"users:write", "dnd:write", "users.profile:write", "search:read",
 	}
-	BotScopes = []string{
-		"channels:history", "channels:read", "groups:history", "im:history",
-		"mpim:history", "users:read",
-	}
 )
 
-// AuthorizeURL builds the consent URL for the given app + state. A non-empty
-// challenge switches the request to PKCE, which also drops the bot scopes:
-// Slack rejects them on desktop (loopback) redirects once PKCE is enabled.
+// AuthorizeURL builds the consent URL for the given app + state. The challenge
+// is mandatory and no "scope" (bot scope) parameter is ever sent — Slack
+// rejects the authorization on both counts for a loopback redirect.
 func AuthorizeURL(clientID, state, challenge, redirect string) string {
-	v := url.Values{
-		"client_id":    {clientID},
-		"user_scope":   {strings.Join(UserScopes, ",")},
-		"redirect_uri": {redirect},
-		"state":        {state},
-	}
-	if challenge != "" {
-		v.Set("code_challenge", challenge)
-		v.Set("code_challenge_method", "S256")
-	} else {
-		v.Set("scope", strings.Join(BotScopes, ","))
-	}
-	return authorizeURL + "?" + v.Encode()
+	return authorizeURL + "?" + url.Values{
+		"client_id":             {clientID},
+		"user_scope":            {strings.Join(UserScopes, ",")},
+		"redirect_uri":          {redirect},
+		"state":                 {state},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+	}.Encode()
 }
 
 // verifier is a PKCE code_verifier: 32 random bytes, base64url without padding
@@ -148,13 +142,11 @@ func Login(ctx context.Context, creds config.OAuthCreds, onURL func(string)) (co
 	if err != nil {
 		return config.Tokens{}, Team{}, err
 	}
-	var verif, challenge string
-	if creds.PKCE() {
-		if verif, err = verifier(); err != nil {
-			return config.Tokens{}, Team{}, err
-		}
-		challenge = challengeFor(verif)
+	verif, err := verifier()
+	if err != nil {
+		return config.Tokens{}, Team{}, err
 	}
+	challenge := challengeFor(verif)
 	ln, redirect, err := listenLoopback()
 	if err != nil {
 		return config.Tokens{}, Team{}, err
@@ -202,9 +194,8 @@ func Login(ctx context.Context, creds config.OAuthCreds, onURL func(string)) (co
 	}
 }
 
-// Exchange swaps an authorization code for tokens via oauth.v2.access. Under
-// PKCE the verifier replaces the client secret — Slack rejects the call if both
-// are sent, so exactly one of them goes on the wire.
+// Exchange swaps an authorization code for tokens via oauth.v2.access. The
+// verifier stands in for the client secret, which is never sent.
 func Exchange(ctx context.Context, creds config.OAuthCreds, code, verifier, redirect string) (config.Tokens, Team, error) {
 	form := exchangeForm(creds, code, verifier, redirect)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, accessURL, strings.NewReader(form.Encode()))
@@ -217,20 +208,15 @@ func Exchange(ctx context.Context, creds config.OAuthCreds, code, verifier, redi
 	return parseAccess(resp.Body)
 }
 
-// exchangeForm builds the oauth.v2.access body. Exactly one credential goes on
-// the wire — the verifier under PKCE, the client secret otherwise.
+// exchangeForm builds the oauth.v2.access body. No client_secret: PKCE public
+// clients must omit it, and Slack rejects a call carrying both.
 func exchangeForm(creds config.OAuthCreds, code, verifier, redirect string) url.Values {
-	form := url.Values{
-		"client_id":    {creds.ClientID},
-		"code":         {code},
-		"redirect_uri": {redirect},
+	return url.Values{
+		"client_id":     {creds.ClientID},
+		"code":          {code},
+		"redirect_uri":  {redirect},
+		"code_verifier": {verifier},
 	}
-	if verifier != "" {
-		form.Set("code_verifier", verifier)
-	} else {
-		form.Set("client_secret", creds.ClientSecret)
-	}
-	return form
 }
 
 // Team identifies the workspace the user just authorized.

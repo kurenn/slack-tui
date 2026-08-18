@@ -82,12 +82,19 @@ You can also pick **"Sign in with Slack"** in onboarding, or paste a user token
 > back denied, that's the wall you hit — ask an admin to approve slack-tui, or
 > use your own app (below).
 
-### Bring your own Slack app
+### Socket Mode (live unread) — and bringing your own app
 
-Optional, and needed for exactly one thing: **Socket Mode live unread**. Slack
-forbids bot scopes on the PKCE desktop flow, so the built-in app gets a user
-token only — everything works except the live unread stream, which falls back to
-polling.
+Sign-in gets you a **user token**, and that runs everything except the live
+unread stream, which falls back to polling without one.
+
+Slack will not issue a bot token to this flow, from any app: a loopback redirect
+is a "non-web URI", and *"Bot scopes are not allowed when redirecting to a
+non-web URI."* So the two Socket Mode tokens are both copied by hand from your
+own app's admin page — the `xapp-…` app-level token and the `xoxb-…` bot token —
+and pasted into onboarding or set as `SLACK_APP_TOKEN` / `SLACK_BOT_TOKEN`.
+
+That's the only reason to create your own app. If you don't need live unread,
+you never need one.
 
 1. Create a Slack app from the manifest below
    (api.slack.com/apps → *Create New App* → *From a manifest* → paste it).
@@ -174,26 +181,30 @@ polling.
 
 </details>
 
-2. Sign in against it with your browser — *Basic Information* → *App
-   Credentials*:
+2. *OAuth & Permissions* → *Install to Workspace*, then copy the **Bot User
+   OAuth Token** (`xoxb-…`). *Basic Information* → *App-Level Tokens* →
+   generate one with `connections:write` for the `xapp-…` token.
+
+3. To sign in against your own app rather than the built-in one, set
+   `SLACK_CLIENT_ID` (from *Basic Information* → *App Credentials*), or put it
+   in `~/.config/slack-tui/oauth.json`:
 
 ```sh
-SLACK_CLIENT_ID=… SLACK_CLIENT_SECRET=… slack-tui login
+SLACK_CLIENT_ID=… slack-tui login
 ```
 
-Supplying a **secret** is what selects your app's confidential flow and keeps
-the bot scopes. Give only `SLACK_CLIENT_ID` and slack-tui runs PKCE against your
-app instead — user token only, same as the built-in app. Either can also live in
-`~/.config/slack-tui/oauth.json`.
+There is no client **secret** in any of this. Slack requires PKCE for loopback
+redirects, and a PKCE client must not send a secret — if you have one left in
+`oauth.json` from an older version, it is ignored and can be deleted.
 
 Run `slack-tui doctor` to diagnose your setup — it reports which tokens are
 in use (and warns when a stale env var overrides `tokens.json`), checks
 `auth.test`, flags any missing OAuth scopes, and probes Socket Mode. Tokens
 are masked in the output.
 
-For **live** channel unread, also generate an app-level token (`xapp-…`,
-Socket Mode) and invite the bot to the channels you care about — without it,
-unread badges refresh on a slow poll instead.
+Both Socket Mode tokens must be present, and the bot has to be invited to the
+channels you care about (`/invite @slack-tui`) — without that, unread badges
+refresh on a slow poll instead.
 
 **Multiple workspaces:** run `slack-tui login` once per workspace — each
 sign-in is saved under its team name. Switch in-app via `Ctrl-K` →

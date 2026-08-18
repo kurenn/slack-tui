@@ -9,29 +9,26 @@
 #   5. In Slack, `/invite @slack-tui` in any channel you want live (Socket Mode
 #      only streams channels/DMs the app is a member of; personal DMs are polled).
 #
-# You only need your own app for Socket Mode (live unread) or if you'd rather not
-# use the published slack-tui app — a plain install signs in with `slack-tui
-# login` out of the box, no app and no credentials required.
+# You only need your own app for Socket Mode (live unread) — a plain install
+# signs in with `slack-tui login` out of the box, no app and no credentials.
 #
-# Two ways to get the user/bot tokens from your own app:
-#   A) Browser sign-in (recommended): Basic Information → copy the Client ID and
-#      Client Secret into env (SLACK_CLIENT_ID / SLACK_CLIENT_SECRET) or
-#      ~/.config/slack-tui/oauth.json, then run `slack-tui login` (or pick
-#      "Sign in with Slack" in onboarding). The redirect_url below must be
-#      registered (it is, via this manifest).
-#   B) Manual: OAuth & Permissions → copy the User OAuth Token (xoxp-…) and Bot
-#      User OAuth Token (xoxb-…) and paste them in onboarding / set as env vars.
+# Sign-in is always PKCE and never uses a client secret: Slack rejects a loopback
+# redirect without a code_challenge ("Must use PKCE to redirect to a non-web
+# URI"). To sign in against this app instead of the built-in one, set
+# SLACK_CLIENT_ID (Basic Information -> App Credentials) or put it in
+# ~/.config/slack-tui/oauth.json. No secret required, or accepted.
 #
-# The app-level token (xapp-…, step 3) is for Socket Mode only and is never issued
-# by OAuth — provide it via SLACK_APP_TOKEN or the onboarding token form.
+# The bot scopes below are NOT obtainable through that sign-in — "Bot scopes are
+# not allowed when redirecting to a non-web URI." They are granted by installing
+# the app (step 4), and you copy the resulting Bot User OAuth Token (xoxb-...)
+# by hand, exactly like the app-level token in step 3. Both go in the onboarding
+# token form or SLACK_BOT_TOKEN / SLACK_APP_TOKEN.
 #
-# Deliberately NO `pkce_enabled: true` here, though the published slack-tui app
-# does set it. PKCE turns the app into a public client (no client secret), but
-# Slack then treats the loopback redirect as a desktop redirect, and desktop
-# redirects may not request bot scopes — which kills Socket Mode, the main reason
-# to run your own app. It is also a one-way switch: it cannot be turned off
-# without contacting Slack support. Omit the client secret and slack-tui runs
-# PKCE against this app anyway; supply the secret and it keeps the bot scopes.
+# There is deliberately no `pkce_enabled: true` here. The setting is a one-way
+# switch (it cannot be turned off without contacting Slack support), and it
+# proved unnecessary: a PKCE sign-in against an app with the setting OFF renders
+# the consent page normally, so the wire protocol is what Slack enforces, not
+# the app toggle.
 
 display_information:
   name: slack-tui

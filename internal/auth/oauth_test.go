@@ -16,30 +16,25 @@ import (
 	"github.com/kurenn/slack-tui/internal/config"
 )
 
+// Slack rejects a loopback authorization outright without a challenge ("Must
+// use PKCE to redirect to a non-web URI") and again if bot scopes are present
+// ("Bot scopes are not allowed when redirecting to a non-web URI"). Both were
+// confirmed against a live app, so both are asserted here.
 func TestAuthorizeURL(t *testing.T) {
-	u := AuthorizeURL("CID", "STATE", "", "http://localhost:9899/callback")
-	for _, want := range []string{"client_id=CID", "state=STATE", "user_scope=", "redirect_uri=", "users.profile%3Awrite"} {
-		if !strings.Contains(u, want) {
-			t.Errorf("authorize URL missing %q:\n%s", want, u)
-		}
-	}
-	if !strings.Contains(u, "scope=channels") {
-		t.Errorf("confidential flow should request bot scopes:\n%s", u)
-	}
-	if strings.Contains(u, "code_challenge") {
-		t.Errorf("no challenge given, but URL carries PKCE params:\n%s", u)
-	}
-}
-
-// PKCE mode must add the challenge and drop the bot scopes — Slack rejects bot
-// scopes on a desktop (loopback) redirect once PKCE is on.
-func TestAuthorizeURLPKCE(t *testing.T) {
 	u := AuthorizeURL("CID", "STATE", "CHAL", "http://localhost:9899/callback")
 	q, err := url.Parse(u)
 	if err != nil {
 		t.Fatal(err)
 	}
 	v := q.Query()
+	for _, want := range []string{"client_id", "state", "user_scope", "redirect_uri"} {
+		if v.Get(want) == "" {
+			t.Errorf("authorize URL missing %s:\n%s", want, u)
+		}
+	}
+	if !strings.Contains(v.Get("user_scope"), "users.profile:write") {
+		t.Errorf("user_scope = %q", v.Get("user_scope"))
+	}
 	if v.Get("code_challenge") != "CHAL" {
 		t.Errorf("code_challenge = %q, want CHAL", v.Get("code_challenge"))
 	}
@@ -47,10 +42,7 @@ func TestAuthorizeURLPKCE(t *testing.T) {
 		t.Errorf("code_challenge_method = %q, want S256", v.Get("code_challenge_method"))
 	}
 	if v.Has("scope") {
-		t.Errorf("PKCE flow must not request bot scopes, got %q", v.Get("scope"))
-	}
-	if v.Get("user_scope") == "" {
-		t.Error("PKCE flow still needs user scopes")
+		t.Errorf("bot scopes are never allowed on a loopback redirect, got %q", v.Get("scope"))
 	}
 }
 
@@ -79,30 +71,19 @@ func TestVerifierAndChallenge(t *testing.T) {
 	}
 }
 
-// The two flows are mutually exclusive on the wire: Slack rejects a call that
-// carries both a client secret and a verifier.
-func TestExchangeForm(t *testing.T) {
+// A PKCE client must omit client_secret — Slack rejects a call carrying both.
+// Even a configured secret (a leftover oauth.json) must never reach the wire.
+func TestExchangeFormNeverSendsSecret(t *testing.T) {
 	creds := config.OAuthCreds{ClientID: "CID", ClientSecret: "SECRET"}
-	for _, tc := range []struct {
-		name, verifier string
-		wantSet        string
-		wantUnset      string
-	}{
-		{"pkce", "VERIF", "code_verifier", "client_secret"},
-		{"confidential", "", "client_secret", "code_verifier"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			form := exchangeForm(creds, "CODE", tc.verifier, "http://localhost:9899/callback")
-			if form.Get(tc.wantSet) == "" {
-				t.Errorf("%s not set: %v", tc.wantSet, form)
-			}
-			if form.Has(tc.wantUnset) {
-				t.Errorf("%s must not be sent: %v", tc.wantUnset, form)
-			}
-			if form.Get("code") != "CODE" || form.Get("client_id") != "CID" {
-				t.Errorf("form = %v", form)
-			}
-		})
+	form := exchangeForm(creds, "CODE", "VERIF", "http://localhost:9899/callback")
+	if form.Has("client_secret") {
+		t.Errorf("client_secret must never be sent: %v", form)
+	}
+	if form.Get("code_verifier") != "VERIF" {
+		t.Errorf("code_verifier = %q", form.Get("code_verifier"))
+	}
+	if form.Get("code") != "CODE" || form.Get("client_id") != "CID" {
+		t.Errorf("form = %v", form)
 	}
 }
 

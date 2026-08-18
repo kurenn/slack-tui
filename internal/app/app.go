@@ -4,6 +4,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/kurenn/slack-tui/internal/auth"
 	"github.com/kurenn/slack-tui/internal/config"
 	"github.com/kurenn/slack-tui/internal/data"
 	"github.com/kurenn/slack-tui/internal/source"
@@ -42,11 +44,11 @@ func (m Model) draftWidth() int {
 	if m.threadOpen() {
 		centerW = m.width - sidebarWidth - m.threadWidth - 2
 	}
-	return max(4, (centerW - 2) - 24)
+	return max(4, (centerW-2)-24)
 }
 
 func (m Model) threadDraftWidth() int {
-	return max(4, (m.threadWidth - 2) - 24)
+	return max(4, (m.threadWidth-2)-24)
 }
 
 // wrappedRows counts the display rows value occupies in a textarea of width w —
@@ -101,6 +103,7 @@ type Model struct {
 	src       source.Source
 	ws        *data.Workspace
 	prefs     config.Prefs
+	tokens    config.Tokens // live credentials; refreshed in place when rotating
 	pal       theme.Palette
 	density   theme.Density
 	showHints bool
@@ -146,10 +149,10 @@ type Model struct {
 	findInput   textinput.Model
 	searchQuery string // last local-find query (n/N repeat)
 
-	pendingFiles []string        // local files staged for the active conversation
-	attachOpen   bool            // the "attach file" input overlay is open
+	pendingFiles []string // local files staged for the active conversation
+	attachOpen   bool     // the "attach file" input overlay is open
 	attachInput  textinput.Model
-	uploadNote   string          // transient "uploading…" note above the composer
+	uploadNote   string // transient "uploading…" note above the composer
 
 	newMark       map[string]string // convID → first-unread message ID (the ── new ── rule)
 	pendingUnread map[string]int    // unread count snapshot for channels opening async
@@ -217,7 +220,7 @@ func New() Model {
 
 	// Tokens come from the stored file, with env vars overriding per-token.
 	saved, _ := config.LoadTokens()
-	tok := saved.Resolve()
+	tok := refreshIfDue(saved).Resolve()
 
 	var src source.Source
 	if tok.User != "" {
@@ -228,6 +231,7 @@ func New() Model {
 		src = source.NewMock()
 	}
 	m := NewWith(src, prefs)
+	m.tokens = tok
 
 	// Session state (drafts + palette recency) lives outside NewWith so tests
 	// stay hermetic; restore it and arm the save-on-quit.
@@ -253,6 +257,39 @@ func New() Model {
 		sl.StartSocket(tok.App, tok.Bot)
 	}
 	return m
+}
+
+// refreshIfDue renews a rotating user token that is expired or close to it.
+// Safe to call here because New() already runs inside a tea.Cmd, off the UI
+// thread, behind the connecting screen.
+//
+// The new credentials are persisted BEFORE being returned for use: the refresh
+// token just spent is single-use and already dead, so a crash after the call
+// but before the write would cost the user a re-login. On any failure we return
+// the old tokens unchanged and let the normal expired-token error surface —
+// refusing to start would be worse than starting and reporting.
+func refreshIfDue(t config.Tokens) config.Tokens {
+	if os.Getenv("SLACK_USER_TOKEN") != "" {
+		return t // an explicit override is the user's to manage
+	}
+	if !auth.Due(t) {
+		return t
+	}
+	creds := config.LoadOAuthCreds()
+	if !creds.Ready() {
+		return t // no client ID to refresh against
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	fresh, err := auth.Refresh(ctx, creds, t.Refresh)
+	if err != nil {
+		return t
+	}
+	if err := config.SaveRefreshed(fresh); err != nil {
+		return t
+	}
+	t.User, t.Refresh, t.ExpiresAt = fresh.User, fresh.Refresh, fresh.ExpiresAt
+	return t
 }
 
 // ReloadMsg asks root to tear this app down and rebuild it — emitted after the
@@ -360,7 +397,7 @@ func NewWith(src source.Source, prefs config.Prefs) Model {
 		return ta
 	}
 
-	activeID := "engineering" // the mock's demo channel
+	activeID := "engineering"                    // the mock's demo channel
 	if _, ok := ws.Conversation(activeID); !ok { // real Slack: pick the first channel/DM
 		switch {
 		case len(ws.Channels) > 0:
@@ -953,7 +990,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.selecting, m.selActive = false, false // reflow invalidates layout-relative selection coords
 		return m, nil
 	case pollMsg:
-		return m, tea.Batch(pollTick(), m.refresh(), m.markReadCmd(m.activeID))
+		cmds := []tea.Cmd{pollTick(), m.refresh(), m.markReadCmd(m.activeID)}
+		if c := m.refreshTokenCmd(); c != nil {
+			cmds = append(cmds, c)
+		}
+		return m, tea.Batch(cmds...)
+	case tokenRefreshedMsg:
+		if msg.err != nil {
+			// Keep going on the old token: it is valid until it isn't, and the
+			// next tick retries. A banner here would fire every poll.
+			return m, nil
+		}
+		m.tokens.User, m.tokens.Refresh, m.tokens.ExpiresAt = msg.toks.User, msg.toks.Refresh, msg.toks.ExpiresAt
+		if sl, ok := m.src.(*source.Slack); ok {
+			sl.SetUserToken(msg.toks.User)
+		}
+		return m, nil
 	case dmPollMsg:
 		cmd := m.unreadCmd(m.dmIDs()) // reads the current rotation window…
 		m.dmPollOffset += dmPollTail  // …then advance it so next round covers fresh tail

@@ -51,3 +51,28 @@ func isolateConfigDir(t *testing.T) {
 	t.Setenv("HOME", dir)
 	t.Setenv("XDG_CONFIG_HOME", dir)
 }
+
+// A refresh must not disturb the Socket Mode tokens: they are pasted by hand,
+// and OAuth never reissues them, so clobbering them would silently kill live
+// unread on every token rotation.
+func TestSaveRefreshedKeepsSocketTokens(t *testing.T) {
+	isolateConfigDir(t)
+	if err := SaveWorkspace(Workspace{Name: "acme", TeamID: "T1", Tokens: Tokens{
+		User: "old", Refresh: "old-r", ExpiresAt: 10, App: "xapp-keep", Bot: "xoxb-keep",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveRefreshed(Tokens{User: "new", Refresh: "new-r", ExpiresAt: 99}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadTokens()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.User != "new" || got.Refresh != "new-r" || got.ExpiresAt != 99 {
+		t.Errorf("rotating creds not updated: %+v", got)
+	}
+	if got.App != "xapp-keep" || got.Bot != "xoxb-keep" {
+		t.Errorf("socket tokens must survive a refresh: %+v", got)
+	}
+}

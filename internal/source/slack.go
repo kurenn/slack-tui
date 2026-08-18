@@ -1071,3 +1071,10 @@ var ReactionChoices = []string{
 	"memo", "bug", "ship", "shipit", "coffee", "pizza", "cake", "beer", "star",
 	"sparkles", "boom", "zap", "dart", "checkered_flag", "construction", "seedling",
 }
+
+// SetUserToken swaps the credential used for API calls, after a rotating token
+// is refreshed mid-session. The Socket Mode connection is untouched: it runs on
+// the app + bot tokens, which never rotate.
+func (s *Slack) SetUserToken(tok string) {
+	s.api = slack.New(tok, slack.OptionRetry(3))
+}

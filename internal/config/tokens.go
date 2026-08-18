@@ -10,10 +10,11 @@ import (
 // Tokens holds one workspace's Slack credentials. User is required for real
 // Slack; App + Bot enable Socket Mode (live channel unread).
 //
-// Refresh and ExpiresAt are set only when Slack hands back a rotating user
-// token. Nothing refreshes them yet — they exist so a rotating token is
-// recorded and reported rather than silently expiring mid-session. Rotation is
-// off for the loopback + PKCE flow we use, so these stay empty in practice.
+// Refresh and ExpiresAt carry the rotating user token. They are always set for
+// a PKCE sign-in: Slack forces rotation for a loopback ("desktop") redirect
+// even with the app's token-rotation setting opted out, so the access token
+// expires in ~12 hours and must be refreshed with auth.Refresh. They stay empty
+// only for a token pasted by hand.
 type Tokens struct {
 	User      string `json:"user"`
 	App       string `json:"app,omitempty"`
@@ -196,4 +197,27 @@ func (t Tokens) Resolve() Tokens {
 		t.Bot = v
 	}
 	return t
+}
+
+// SaveRefreshed updates only the rotating credentials of the active workspace,
+// leaving the App (xapp) and Bot (xoxb) tokens alone — those are pasted by hand
+// and OAuth never reissues them.
+//
+// Order matters: a rotating refresh token is single-use, so by the time this is
+// called the previous one is already dead. If the process dies between the
+// refresh call and this write, the user has to sign in again — which is why the
+// caller persists before putting the new token to work.
+func SaveRefreshed(t Tokens) error {
+	f, err := loadTokensFile()
+	if err != nil {
+		return err
+	}
+	i := activeIndex(f)
+	if i < 0 {
+		return fmt.Errorf("no active workspace to refresh")
+	}
+	f.Workspaces[i].User = t.User
+	f.Workspaces[i].Refresh = t.Refresh
+	f.Workspaces[i].ExpiresAt = t.ExpiresAt
+	return saveTokensFile(f)
 }

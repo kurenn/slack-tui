@@ -1,6 +1,9 @@
 package app
 
 import (
+	"context"
+	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -8,6 +11,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/kurenn/slack-tui/internal/auth"
+	"github.com/kurenn/slack-tui/internal/config"
 	"github.com/kurenn/slack-tui/internal/data"
 	"github.com/kurenn/slack-tui/internal/source"
 )
@@ -25,8 +30,8 @@ const chanPollInterval = 90 * time.Second
 const presencePollInterval = 60 * time.Second
 
 type (
-	dmPollMsg      struct{}
-	chanPollMsg    struct{}
+	dmPollMsg       struct{}
+	chanPollMsg     struct{}
 	presencePollMsg struct{}
 	// unreadMsg carries the unread counts actually fetched this round (a
 	// rate-limit abort returns a partial map; absent ids stay untouched).
@@ -575,4 +580,40 @@ func indexOfMsg(msgs []data.Message, id string) int {
 		}
 	}
 	return max(0, len(msgs)-1)
+}
+
+// tokenRefreshedMsg carries the outcome of a mid-session token refresh.
+type tokenRefreshedMsg struct {
+	toks config.Tokens
+	err  error
+}
+
+// refreshTokenCmd renews the rotating user token when it is close to expiring,
+// so a session outliving Slack's ~12-hour token keeps working. Returns nil when
+// nothing is due, which is the common case on every poll.
+//
+// Persisting before reporting is deliberate: the spent refresh token is dead
+// the moment Slack answers, so the new one must reach disk even if this process
+// dies immediately after.
+func (m Model) refreshTokenCmd() tea.Cmd {
+	if os.Getenv("SLACK_USER_TOKEN") != "" || !auth.Due(m.tokens) {
+		return nil
+	}
+	refresh := m.tokens.Refresh
+	return func() tea.Msg {
+		creds := config.LoadOAuthCreds()
+		if !creds.Ready() {
+			return tokenRefreshedMsg{err: fmt.Errorf("no client id to refresh with")}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		toks, err := auth.Refresh(ctx, creds, refresh)
+		if err != nil {
+			return tokenRefreshedMsg{err: err}
+		}
+		if err := config.SaveRefreshed(toks); err != nil {
+			return tokenRefreshedMsg{err: err}
+		}
+		return tokenRefreshedMsg{toks: toks}
+	}
 }

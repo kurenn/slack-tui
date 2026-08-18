@@ -196,3 +196,64 @@ func TestListenLoopbackSkipsBusyPort(t *testing.T) {
 		t.Errorf("redirect %q does not match bound port %s", redirect, port)
 	}
 }
+
+// Slack returns the refreshed user token nested under authed_user in some
+// replies and flat in others; both must yield the same tokens.
+func TestParseRefreshBothShapes(t *testing.T) {
+	now = func() time.Time { return time.Unix(1_000, 0) }
+	defer func() { now = time.Now }()
+
+	for _, tc := range []struct{ name, body string }{
+		{"nested", `{"ok":true,"authed_user":{"access_token":"xoxe.xoxp-new","refresh_token":"xoxe-1-next","expires_in":43200}}`},
+		{"flat", `{"ok":true,"token_type":"user","access_token":"xoxe.xoxp-new","refresh_token":"xoxe-1-next","expires_in":43200}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseRefresh(strings.NewReader(tc.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.User != "xoxe.xoxp-new" || got.Refresh != "xoxe-1-next" {
+				t.Errorf("got %+v", got)
+			}
+			if got.ExpiresAt != 44_200 {
+				t.Errorf("expiresAt = %d, want 44200", got.ExpiresAt)
+			}
+		})
+	}
+}
+
+// A reply without a new refresh token must be an error, not a silent success:
+// the spent token is already dead, so accepting it would strand the user with
+// no way to refresh again and no warning until the access token expired.
+func TestParseRefreshRejectsUnusableReplies(t *testing.T) {
+	for name, body := range map[string]string{
+		"no refresh token": `{"ok":true,"authed_user":{"access_token":"xoxe.xoxp-new","expires_in":43200}}`,
+		"no access token":  `{"ok":true,"authed_user":{"refresh_token":"xoxe-1-next"}}`,
+		"api error":        `{"ok":false,"error":"invalid_refresh_token"}`,
+		"bot token":        `{"ok":true,"token_type":"bot","access_token":"xoxb-nope","refresh_token":"r"}`,
+	} {
+		if _, err := parseRefresh(strings.NewReader(body)); err == nil {
+			t.Errorf("%s: expected an error, got none", name)
+		}
+	}
+}
+
+func TestDue(t *testing.T) {
+	now = func() time.Time { return time.Unix(100_000, 0) }
+	defer func() { now = time.Now }()
+
+	for name, tc := range map[string]struct {
+		tok  config.Tokens
+		want bool
+	}{
+		"fresh":           {config.Tokens{Refresh: "r", ExpiresAt: 100_000 + int64(2*RefreshSkew/time.Second)}, false},
+		"inside skew":     {config.Tokens{Refresh: "r", ExpiresAt: 100_000 + 60}, true},
+		"already expired": {config.Tokens{Refresh: "r", ExpiresAt: 99_000}, true},
+		"pasted token":    {config.Tokens{User: "xoxp-manual"}, false},
+		"no refresh":      {config.Tokens{ExpiresAt: 100_001}, false},
+	} {
+		if got := Due(tc.tok); got != tc.want {
+			t.Errorf("%s: Due = %v, want %v", name, got, tc.want)
+		}
+	}
+}

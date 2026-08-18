@@ -156,6 +156,27 @@ func reportTokens(file config.Tokens, env envValues) {
 			fmt.Printf("  %s%-4s %s  %s\n", marker, r.label, src, mask(eff))
 		}
 	}
+	reportRotation(file)
+}
+
+// reportRotation explains the expiry on a PKCE sign-in. Slack forces rotation
+// for the loopback redirect, so an expired token with no refresh token is the
+// one state that needs a re-login rather than a retry.
+func reportRotation(file config.Tokens) {
+	switch {
+	case !file.Rotating():
+		fmt.Println("  – user token does not expire (pasted by hand)")
+	case file.Refresh == "":
+		fmt.Println("  ✗ user token expires but has no refresh token — run `slack-tui login`")
+	default:
+		left := time.Until(time.Unix(file.ExpiresAt, 0))
+		if left <= 0 {
+			fmt.Println("  ! user token expired — it refreshes automatically on next launch")
+			return
+		}
+		fmt.Printf("  ✓ user token expires in %s (auto-refreshed within %s of expiry)\n",
+			left.Round(time.Minute), auth.RefreshSkew)
+	}
 }
 
 // reportSocketMode probes apps.connections.open when both app+bot resolve.

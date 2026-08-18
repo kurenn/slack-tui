@@ -78,6 +78,16 @@ Tokens are stored in `~/.config/slack-tui/tokens.json` (0600); env vars
 You can also pick **"Sign in with Slack"** in onboarding, or paste a user token
 (`xoxp-…`) directly.
 
+**Tokens from a browser sign-in expire.** Slack forces token rotation for a
+loopback redirect — it does this regardless of the app's token-rotation setting,
+so there's no opting out — and the access token lasts about 12 hours. slack-tui
+refreshes it for you: once within 30 minutes of expiry, at launch and again on
+its poll loop, so a session left running overnight keeps working. The refresh
+token is single-use and the replacement is written to disk before it's used, so
+an interrupted refresh costs you nothing worse than one `slack-tui login`.
+`slack-tui doctor` shows the time remaining. A hand-pasted `xoxp-…` token doesn't
+expire and is never refreshed.
+
 > Some workspaces require an admin to approve third-party apps. If sign-in comes
 > back denied, that's the wall you hit — ask an admin to approve slack-tui, or
 > use your own app (below).

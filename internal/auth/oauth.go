@@ -289,3 +289,82 @@ func page(w http.ResponseWriter, msg string) {
 	w.Header().Set("Content-Type", "text/html")
 	fmt.Fprintf(w, `<!doctype html><html><body style="font-family:system-ui;background:#0d1117;color:#e6edf3;display:flex;height:100vh;align-items:center;justify-content:center;margin:0"><div style="text-align:center"><h2>slack-tui</h2><p>%s</p></div></body></html>`, msg)
 }
+
+// RefreshSkew is how long before expiry a token is considered due for refresh.
+// Slack's rotating user tokens live 12 hours, so this is generous: it covers
+// clock skew and a long-running poll without refreshing on every launch.
+const RefreshSkew = 30 * time.Minute
+
+// Due reports whether a rotating token should be refreshed before use. A
+// non-rotating token (no expiry) is never due.
+func Due(t config.Tokens) bool {
+	return t.Refresh != "" && t.ExpiresAt > 0 &&
+		now().Add(RefreshSkew).Unix() >= t.ExpiresAt
+}
+
+// Refresh trades a refresh token for a fresh access token. Rotating refresh
+// tokens are single-use: the response carries the *next* refresh token, and the
+// one just spent is dead whether or not we manage to persist the reply. The
+// caller must therefore save the result before using it — see config.SaveRefreshed.
+func Refresh(ctx context.Context, creds config.OAuthCreds, refreshToken string) (config.Tokens, error) {
+	form := url.Values{
+		"client_id":     {creds.ClientID},
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {refreshToken},
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, accessURL, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return config.Tokens{}, err
+	}
+	defer resp.Body.Close()
+	return parseRefresh(resp.Body)
+}
+
+// refreshResponse covers both shapes Slack uses: a user-token refresh nests the
+// new credentials under authed_user, but the flat form appears too, so accept
+// either rather than silently reading zero values.
+type refreshResponse struct {
+	OK           bool   `json:"ok"`
+	Error        string `json:"error"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresIn    int64  `json:"expires_in"`
+	TokenType    string `json:"token_type"`
+	AuthedUser   struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int64  `json:"expires_in"`
+	} `json:"authed_user"`
+}
+
+func parseRefresh(r io.Reader) (config.Tokens, error) {
+	var out refreshResponse
+	if err := json.NewDecoder(r).Decode(&out); err != nil {
+		return config.Tokens{}, err
+	}
+	if !out.OK {
+		return config.Tokens{}, fmt.Errorf("oauth refresh: %s", out.Error)
+	}
+	access, refresh, expires := out.AuthedUser.AccessToken, out.AuthedUser.RefreshToken, out.AuthedUser.ExpiresIn
+	if access == "" { // flat form
+		if out.TokenType != "" && out.TokenType != "user" {
+			return config.Tokens{}, fmt.Errorf("oauth refresh: got a %q token, want a user token", out.TokenType)
+		}
+		access, refresh, expires = out.AccessToken, out.RefreshToken, out.ExpiresIn
+	}
+	if access == "" {
+		return config.Tokens{}, fmt.Errorf("oauth refresh: no user token in response")
+	}
+	// A reply without a new refresh token would strand us: the spent one is
+	// already dead, so there would be no way to refresh again.
+	if refresh == "" {
+		return config.Tokens{}, fmt.Errorf("oauth refresh: no new refresh token in response")
+	}
+	t := config.Tokens{User: access, Refresh: refresh}
+	if expires > 0 {
+		t.ExpiresAt = now().Unix() + expires
+	}
+	return t, nil
+}

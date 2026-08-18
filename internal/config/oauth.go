@@ -3,6 +3,8 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"regexp"
+	"strings"
 )
 
 // DefaultClientID is the client ID of the published slack-tui Slack app, so a
@@ -33,6 +35,15 @@ type OAuthCreds struct {
 
 // Ready reports whether a browser sign-in can be attempted at all.
 func (c OAuthCreds) Ready() bool { return c.ClientID != "" }
+
+// clientIDRe matches Slack's client ID: two digit runs, dot-separated.
+var clientIDRe = regexp.MustCompile(`^\d{6,20}\.\d{6,20}$`)
+
+// ValidClientID reports whether s looks like a Slack client ID. Shared by
+// `slack-tui setup` and the onboarding screen so the two can't disagree about
+// what they accept. The App ID (A0B8…) sits directly above the Client ID on
+// Slack's page and is the usual mis-paste; it fails this.
+func ValidClientID(s string) bool { return clientIDRe.MatchString(strings.TrimSpace(s)) }
 
 // LoadOAuthCreds reads app credentials from oauth.json, falling back to the
 // built-in app, with env vars (SLACK_CLIENT_ID / SLACK_CLIENT_SECRET)

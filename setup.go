@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/atotto/clipboard"
@@ -21,11 +20,6 @@ import (
 //
 //go:embed slack-app-manifest.json
 var manifest string
-
-// clientIDRe matches Slack's client ID format (two digit runs, dot-separated).
-// Pasting the App ID (A0B8…) or the signing secret by mistake is the common
-// slip, and both fail this.
-var clientIDRe = regexp.MustCompile(`^\d{6,20}\.\d{6,20}$`)
 
 // setup walks the user through creating their own Slack app and signing in
 // against it. It exists because Slack has no way to hand someone a ready-made
@@ -97,7 +91,7 @@ func promptClientID() (string, error) {
 		switch {
 		case id == "":
 			continue
-		case clientIDRe.MatchString(id):
+		case config.ValidClientID(id):
 			return id, nil
 		case strings.HasPrefix(id, "A"):
 			fmt.Println("  ✗ that looks like the App ID — the Client ID is two number runs, e.g. 1234567890.9876543210")

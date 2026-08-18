@@ -78,6 +78,8 @@ func Goto(m Model, target string) Model {
 	case phaseOAuth:
 		m.oauth = newTypewriter(oauthLines("slack"))
 		m.oauth.fastForward()
+	case phaseAppSetup:
+		m.phase = phaseAppSetup
 	case phaseWizard:
 		m.phase = phaseWizard
 		// "keyboard:N" jumps the trainer to drill N (prior drills marked done).

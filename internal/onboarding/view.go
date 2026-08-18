@@ -177,6 +177,8 @@ func (m Model) stage(p theme.Palette) string {
 		return bootScreen(p, body)
 	case phaseAuth:
 		return bootScreen(p, m.viewAuth(p))
+	case phaseAppSetup:
+		return bootScreen(p, m.viewAppSetup(p))
 	case phaseToken:
 		return bootScreen(p, m.viewTokenForm(p))
 	case phaseIdentity:
@@ -235,7 +237,7 @@ func (m Model) titlebar(p theme.Palette) string {
 func (m Model) statusbar(p theme.Palette) string {
 	bg := lipgloss.NewStyle().Background(p.StatusBg)
 	label := map[string]string{
-		phaseBoot: "BOOT", phaseAuth: "AUTH", phaseOAuth: "OAUTH", phaseToken: "TOKEN",
+		phaseBoot: "BOOT", phaseAuth: "AUTH", phaseOAuth: "OAUTH", phaseAppSetup: "APP", phaseToken: "TOKEN",
 		phaseIdentity: "IDENTITY", phaseWizard: "SETUP", phaseLaunch: "READY",
 	}[m.phase]
 	mode := lipgloss.NewStyle().Background(p.Accent).Foreground(p.Bg).Bold(true).Padding(0, 1).Render(label)
@@ -267,6 +269,8 @@ func (m Model) hints() [][2]string {
 		return [][2]string{{"any key", "skip"}}
 	case phaseAuth:
 		return [][2]string{{"j/k", "choose"}, {"1-4", "jump"}, {"↵", "authenticate"}}
+	case phaseAppSetup:
+		return [][2]string{{"^y", "copy manifest"}, {"^o", "open slack"}, {"↵", "sign in"}, {"esc", "back"}}
 	case phaseToken, phaseIdentity:
 		return [][2]string{{"↵", "continue"}}
 	case phaseLaunch:
@@ -385,6 +389,30 @@ func (m Model) viewTokenForm(p theme.Palette) string {
 	}
 	hint := lipgloss.NewStyle().Foreground(p.Dim2).Render("tab switches fields · ↵ enter continues · stays on this machine")
 	return lipgloss.JoinVertical(lipgloss.Left, strings.Join(head, "\n"), "", strings.Join(rows, "\n"), "", hint)
+}
+
+// viewAppSetup walks the user through creating their own Slack app without
+// leaving the program. slack-tui isn't distributed through Slack, so this is the
+// ordinary path for a new install rather than a fallback.
+func (m Model) viewAppSetup(p theme.Palette) string {
+	head := []string{
+		m.tlineRender(p, tline{text: "connect your Slack workspace", class: "fg"}),
+		m.tlineRender(p, tline{text: "slack-tui signs in through an app you own — it takes about two minutes,", class: "dim"}),
+		m.tlineRender(p, tline{text: "and there's no client secret involved.", class: "dim"}),
+		"",
+		m.tlineRender(p, tline{text: "  1. ^y copies the app manifest to your clipboard", class: "fill"}),
+		m.tlineRender(p, tline{text: "  2. ^o opens api.slack.com/apps — Create New App → From an app manifest", class: "fill"}),
+		m.tlineRender(p, tline{text: "  3. paste it, create the app, then copy the Client ID below", class: "fill"}),
+	}
+	if m.appSetupNote != "" {
+		head = append(head, "", m.tlineRender(p, tline{text: m.appSetupNote, class: "warn"}))
+	}
+	label := lipgloss.NewStyle().Foreground(p.Green).Render("Client ID: ")
+	field := lipgloss.NewStyle().Foreground(p.Fg).Render(m.clientID.View()) +
+		lipgloss.NewStyle().Foreground(p.Accent).Render("▋")
+	hint := lipgloss.NewStyle().Foreground(p.Dim2).Render(
+		"Basic Information → App Credentials · ↵ signs in · esc goes back")
+	return lipgloss.JoinVertical(lipgloss.Left, strings.Join(head, "\n"), "", label+field, "", hint)
 }
 
 func (m Model) viewLogin(p theme.Palette, label, input string, lines []tline, hint string) string {

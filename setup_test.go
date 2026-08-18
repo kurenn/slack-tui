@@ -5,11 +5,12 @@ import (
 	"testing"
 
 	"github.com/kurenn/slack-tui/internal/auth"
+	"github.com/kurenn/slack-tui/internal/config"
 )
 
-func TestClientIDRe(t *testing.T) {
+func TestValidClientID(t *testing.T) {
 	for _, ok := range []string{"1234567890.9876543210", "2707126420452.11291972393302"} {
-		if !clientIDRe.MatchString(ok) {
+		if !config.ValidClientID(ok) {
 			t.Errorf("%q should be a valid client ID", ok)
 		}
 	}
@@ -19,7 +20,7 @@ func TestClientIDRe(t *testing.T) {
 		"A0B8KULBK8W", "", "1234567890", "1234567890.", ".9876543210",
 		"xoxp-123", "abcdef0123456789abcdef0123456789",
 	} {
-		if clientIDRe.MatchString(bad) {
+		if config.ValidClientID(bad) {
 			t.Errorf("%q should be rejected", bad)
 		}
 	}

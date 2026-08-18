@@ -1,9 +1,12 @@
 package onboarding
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/kurenn/slack-tui/internal/config"
 )
 
 func sized() Model { return WithSize(New(), 100, 30) }
@@ -253,4 +256,67 @@ func isolateConfigDir(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 	t.Setenv("XDG_CONFIG_HOME", dir)
+}
+
+// With no Slack app configured — the normal state for a fresh install, since
+// slack-tui isn't distributed through Slack — "Sign in with Slack" must set the
+// app up in place. It used to dump the user on the paste-a-token screen and
+// tell them to quit and run a CLI command.
+func TestSignInWithoutAppOffersSetup(t *testing.T) {
+	isolateConfigDir(t)
+	t.Setenv("SLACK_CLIENT_ID", "")
+	t.Setenv("SLACK_CLIENT_SECRET", "")
+
+	m := Key(Goto(WithSize(New(), 96, 30), phaseAuth), "1")
+	if m.phase != phaseAppSetup {
+		t.Fatalf("phase = %q, want %q", m.phase, phaseAppSetup)
+	}
+	view := Dump(m, 96, 30)
+	for _, want := range []string{"Client ID", "app manifest", "api.slack.com/apps"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("app-setup screen missing %q", want)
+		}
+	}
+}
+
+// A bad client ID must be reported in place and never written to disk — the
+// paste is one keystroke away from the App ID sitting just above it.
+func TestAppSetupRejectsBadClientID(t *testing.T) {
+	isolateConfigDir(t)
+	t.Setenv("SLACK_CLIENT_ID", "")
+	t.Setenv("SLACK_CLIENT_SECRET", "")
+
+	m := Key(Goto(WithSize(New(), 96, 30), phaseAuth), "1")
+	for _, k := range strings.Split("A,0,B,8,K,U,L,B,K,8,W,enter", ",") {
+		m = Key(m, k)
+	}
+	if m.phase != phaseAppSetup {
+		t.Errorf("should stay on the setup screen, got %q", m.phase)
+	}
+	if !strings.Contains(m.appSetupNote, "App ID") {
+		t.Errorf("note = %q, want the App ID hint", m.appSetupNote)
+	}
+	if got := config.LoadOAuthCreds(); got.ClientID != "" {
+		t.Errorf("a rejected id must not be saved, got %q", got.ClientID)
+	}
+}
+
+// Rendering must stay free of side effects: the clipboard write and the browser
+// launch hang off explicit keys, so tests and --dump-ob never clobber the user's
+// clipboard or open a window.
+func TestAppSetupRenderHasNoSideEffects(t *testing.T) {
+	isolateConfigDir(t)
+	prev := AppManifest
+	AppManifest = "" // as in any build that didn't inject it
+	t.Cleanup(func() { AppManifest = prev })
+	m := Goto(WithSize(New(), 96, 30), phaseAppSetup)
+	_ = Dump(m, 96, 30)
+	if m.appSetupNote != "" {
+		t.Errorf("rendering set a note (%q) — something ran that shouldn't have", m.appSetupNote)
+	}
+	// …and the copy key degrades gracefully when no manifest was injected.
+	m = Key(m, "ctrl+y")
+	if !strings.Contains(m.appSetupNote, "unavailable") {
+		t.Errorf("note = %q, want the unavailable-manifest message", m.appSetupNote)
+	}
 }

@@ -38,6 +38,10 @@ func versionString() string {
 }
 
 func main() {
+	// The onboarding app-setup screen offers the manifest for copying; go:embed
+	// only reaches files inside this package, so hand it over here.
+	onboarding.AppManifest = manifest
+
 	if len(os.Args) >= 2 && (os.Args[1] == "--version" || os.Args[1] == "-v" || os.Args[1] == "version") {
 		fmt.Println("slack-tui", versionString())
 		return

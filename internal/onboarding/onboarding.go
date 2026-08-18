@@ -16,11 +16,18 @@ import (
 	"github.com/kurenn/slack-tui/internal/theme"
 )
 
+// AppManifest is the Slack app manifest shown on the app-setup screen, injected
+// by package main (go:embed can only reach files inside its own package tree,
+// and the manifest is a repo-root file the README links to). Empty in tests and
+// --dump-ob renders, which simply offer nothing to copy.
+var AppManifest string
+
 // Phases of the flow.
 const (
 	phaseBoot     = "boot"
 	phaseAuth     = "auth"
 	phaseOAuth    = "oauth"
+	phaseAppSetup = "appsetup"
 	phaseToken    = "token"
 	phaseIdentity = "identity"
 	phaseWizard   = "wizard"
@@ -55,15 +62,17 @@ type Model struct {
 	status    string
 
 	handle     textinput.Model
+	clientID   textinput.Model // Slack app client ID, for the in-flow app setup
 	token      textinput.Model // user token (xoxp)
 	appToken   textinput.Model // app-level token (xapp) — Socket Mode
 	botToken   textinput.Model // bot token (xoxb) — Socket Mode
 	tokenField int             // which token input is focused (0=user,1=app,2=bot)
 
-	authSel   int
-	provider  string
-	tokenNote string // why we landed on the paste-a-token screen, when we redirected here
-	teamName  string // real workspace from OAuth; empty for the demo/mock path
+	authSel      int
+	provider     string
+	tokenNote    string // why we landed on the paste-a-token screen, when we redirected here
+	appSetupNote string // feedback on the app-setup screen (copied / opened / bad id)
+	teamName     string // real workspace from OAuth; empty for the demo/mock path
 
 	oauthRunning bool   // real browser OAuth in flight
 	oauthErr     string // last OAuth failure, shown on the oauth screen
@@ -95,6 +104,7 @@ func New() Model {
 		density:   orDefault(prefs.Density, "comfortable"),
 		status:    orDefault(prefs.Status, "online"),
 		handle:    mk("handle"),
+		clientID:  mk("clientid"),
 		token:     mk("token"),
 		appToken:  mk("app"),
 		botToken:  mk("bot"),

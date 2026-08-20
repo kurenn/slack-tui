@@ -1223,7 +1223,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				text := m.selectionText()
 				m.selActive = false // unselect on release
 				if text != "" {
-					_ = clipboard.WriteAll(text)
+					_ = writeClipboard(text)
 					m.copyToast = "copied"
 					m.copyToastX = msg.X
 					m.copyToastY = clamp(msg.Y+1, 0, m.height-2) // just below the release, above the status bar
@@ -1499,12 +1499,12 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "y": // yank the selected message or thread reply to the clipboard
 		if m.focus == focusThread {
 			if r, ok := m.selectedReply(); ok {
-				if err := clipboard.WriteAll(r.Text); err != nil {
+				if err := writeClipboard(r.Text); err != nil {
 					return m, m.flash(fmt.Errorf("clipboard: %w", err))
 				}
 			}
 		} else if msg, ok := m.selectedMsg(); ok {
-			if err := clipboard.WriteAll(msg.Text); err != nil {
+			if err := writeClipboard(msg.Text); err != nil {
 				return m, m.flash(fmt.Errorf("clipboard: %w", err))
 			}
 		}
@@ -1737,6 +1737,11 @@ func (m *Model) titleCmd() tea.Cmd {
 	}
 	return tea.SetWindowTitle(title)
 }
+
+// writeClipboard is the seam for the yank path. Tests replace it: the real
+// implementation shells out via PATH and would overwrite the developer's actual
+// clipboard with mock message text, which `go test ./internal/app/` did.
+var writeClipboard = clipboard.WriteAll
 
 // bellCmd rings the terminal bell — BEL prints nothing, so it can't disturb the
 // alt screen. Terminals surface it as the usual badge/sound.

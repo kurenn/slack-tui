@@ -1,8 +1,14 @@
 package doctor
 
 import (
+	"io"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/kurenn/slack-tui/internal/config"
 )
 
 func TestTokenSource(t *testing.T) {
@@ -97,4 +103,47 @@ func TestSplitScopes(t *testing.T) {
 	if got := splitScopes("identify,chat:write,search:read"); !reflect.DeepEqual(got, []string{"identify", "chat:write", "search:read"}) {
 		t.Errorf("splitScopes (no spaces) = %v", got)
 	}
+}
+
+// On Linux with XDG_CONFIG_HOME set, os.UserConfigDir() resolves to the same
+// path as config.Dir(), so the current directory was reported as a legacy one.
+func TestNoLegacyWarningWhenSamePath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir)
+
+	cur, err := config.Dir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacy := legacyConfigDir(); legacy != cur {
+		t.Skipf("platform keeps them distinct (%s vs %s)", legacy, cur)
+	}
+	if err := os.MkdirAll(cur, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cur, "prefs.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, reportConfig)
+	if strings.Contains(out, "legacy config also present") {
+		t.Errorf("warned about the current dir being legacy:\n%s", out)
+	}
+}
+
+// captureStdout runs fn with stdout redirected and returns what it printed.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := os.Stdout
+	os.Stdout = w
+	fn()
+	w.Close()
+	os.Stdout = prev
+	b, _ := io.ReadAll(r)
+	return string(b)
 }

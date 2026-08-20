@@ -108,7 +108,10 @@ func reportConfig() {
 			fmt.Printf("  – %s (absent)\n", name)
 		}
 	}
-	if legacy := legacyConfigDir(); legacy != "" && dirHasFiles(legacy) {
+	// On Linux with XDG_CONFIG_HOME set, os.UserConfigDir() returns the very
+	// same path as config.Dir(), so the "legacy" dir is the current one and the
+	// warning is noise — in the first command people run when something's wrong.
+	if legacy := legacyConfigDir(); legacy != "" && legacy != dir && dirHasFiles(legacy) {
 		fmt.Printf("  ! legacy config also present at %s\n", legacy)
 		fmt.Println("    (reads fall back to it; writes go to the new dir)")
 	}

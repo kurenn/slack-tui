@@ -3,6 +3,36 @@
 slack-tui follows semver-ish tags; every release ships binaries for
 macOS/Linux/Windows plus a Homebrew formula via goreleaser.
 
+## v0.6.1
+
+- **Notifications actually fire** — every alert path, the terminal bell included,
+  hung off a Socket Mode event. Socket Mode needs the `xapp` and `xoxb` tokens,
+  and since v0.6.0 those can't be issued by a browser sign-in at all, so the
+  default install could never ring or notify for anything. The unread poll now
+  raises the alert itself: DMs on any increase, channels only when the new
+  messages actually mention you (which also lights the mention dot that polling
+  never set).
+- **The unread poll was over Slack's rate limit** — measured against a real
+  workspace it spent ~51 `conversations.history` calls/minute against a Tier-3
+  ceiling of ~50, so rounds were aborting mid-sweep on 429s and leaving counts
+  stale. Channels polled every channel every round with no bound at all — the
+  same failure v0.5.2 fixed for DMs, never applied to channels. Channels are now
+  bounded the same way, and the budget goes where it changes what you see: DM
+  unread refreshes every 25s instead of 45s, on ~15% less total load. A test does
+  the arithmetic, so changing an interval without re-checking the budget fails
+  CI instead of producing 429s.
+- **`slack-tui login` no longer cries wolf** — it told you a rotating token
+  couldn't be refreshed, which stopped being true two commits after the warning
+  was written.
+- **Onboarding doesn't ask you to sign in twice** — `slack-tui setup` saves
+  tokens without touching prefs, so the next launch put you back on the auth
+  screen minutes after you'd authenticated.
+- **`doctor` stops inventing a legacy config dir** — on any Linux box with
+  `XDG_CONFIG_HOME` set it compared the config directory against itself and
+  always warned.
+- Test coverage raised from 45.6% to 84.1%, with CI now enforcing a floor and
+  asserting that the suite doesn't touch the machine running it.
+
 ## v0.6.0
 
 - **Sign in from the browser, without a client secret** — `slack-tui setup`

@@ -37,11 +37,11 @@ func TestLegacyTokensMigrate(t *testing.T) {
 // token), a new team appends; the saved workspace becomes active.
 func TestSaveWorkspaceUpsert(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	if err := SaveWorkspace(Workspace{Name: "coba", TeamID: "T1", Tokens: Tokens{User: "u1", App: "xapp-1"}}); err != nil {
+	if err := SaveWorkspace(Workspace{Name: "acme", TeamID: "T1", Tokens: Tokens{User: "u1", App: "xapp-1"}}); err != nil {
 		t.Fatal(err)
 	}
 	// Re-login to the same team: no app token in the OAuth result — keep stored.
-	if err := SaveWorkspace(Workspace{Name: "coba", TeamID: "T1", Tokens: Tokens{User: "u2"}}); err != nil {
+	if err := SaveWorkspace(Workspace{Name: "acme", TeamID: "T1", Tokens: Tokens{User: "u2"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := SaveWorkspace(Workspace{Name: "personal", TeamID: "T2", Tokens: Tokens{User: "u3"}}); err != nil {

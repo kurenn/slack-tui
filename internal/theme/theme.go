@@ -162,6 +162,24 @@ var accents = map[string]string{
 // Cycle is the theme order used by the "Cycle theme" palette command.
 var Cycle = []string{"charcoal", "midnight", "phosphor", "solarized", "paper"}
 
+// CycleFor puts "follow the desktop" at the head of the theme cycle when the
+// desktop actually publishes a palette, so it's selectable in Settings and is
+// what a fresh install lands on.
+func CycleFor(followsDesktop bool) []string {
+	if !followsDesktop {
+		return Cycle
+	}
+	return append([]string{OmarchyName}, Cycle...)
+}
+
+// DisplayName is the human label for a theme value.
+func DisplayName(themeVal string) string {
+	if themeVal == OmarchyName {
+		return "Omarchy (follow desktop)"
+	}
+	return Resolve(themeVal, "auto").Name
+}
+
 // blend alpha-composites overlay over base and returns the solid hex result.
 func blend(base, overlay string, alpha float64) lipgloss.Color {
 	b, err1 := colorful.Hex(base)
@@ -178,6 +196,14 @@ func blend(base, overlay string, alpha float64) lipgloss.Color {
 // Resolve builds the Palette for a theme name with an accent override applied.
 // Unknown theme falls back to charcoal; unknown/"auto" accent keeps theme default.
 func Resolve(themeName, accent string) Palette {
+	// "omarchy" means follow the desktop; fall through to the built-ins when
+	// that isn't readable (another machine, or Omarchy not installed).
+	if themeName == OmarchyName {
+		if p, ok := OmarchyPalette(); ok {
+			return p
+		}
+		themeName = "charcoal"
+	}
 	rt, ok := rawThemes[themeName]
 	if !ok {
 		rt = rawThemes["charcoal"]
@@ -185,6 +211,15 @@ func Resolve(themeName, accent string) Palette {
 	accentHex := rt.accent
 	if a, ok := accents[accent]; ok {
 		accentHex = a
+	}
+	return paletteFrom(rt, accentHex)
+}
+
+// paletteFrom derives the full palette from a raw theme, shared by the built-in
+// themes and the Omarchy bridge so both get identical blending.
+func paletteFrom(rt rawTheme, accentHex string) Palette {
+	if accentHex == "" {
+		accentHex = rt.accent
 	}
 	c := func(s string) lipgloss.Color { return lipgloss.Color(s) }
 	return Palette{

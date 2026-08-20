@@ -1,10 +1,59 @@
 package onboarding
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/kurenn/slack-tui/internal/config"
+	"github.com/kurenn/slack-tui/internal/theme"
 )
+
+// TestMain points every lookup New() makes — the desktop theme, and the config
+// dir it reads tokens and prefs from — at empty directories, so results depend
+// only on what a test sets up.
+//
+// Both halves were learned the hard way. Without the state dir the suite passes
+// on CI and fails on any Omarchy box, where the colour steps are dropped.
+// Without the config dir it passes on a fresh checkout and fails on the
+// maintainer's machine, where a real signed-in token makes onboarding skip the
+// auth screen.
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "slack-tui-test")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("XDG_STATE_HOME", filepath.Join(dir, "state"))
+	os.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "config"))
+	os.Setenv("HOME", dir)
+	for _, v := range []string{"SLACK_USER_TOKEN", "SLACK_APP_TOKEN", "SLACK_BOT_TOKEN", "SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET"} {
+		os.Unsetenv(v)
+	}
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+// withOmarchyTheme points the theme lookup at a fixture, for the tests that
+// need the desktop to be providing colours.
+func withOmarchyTheme(t *testing.T, colors string) {
+	t.Helper()
+	dir := t.TempDir()
+	themeDir := filepath.Join(dir, "omarchy", "current", "theme")
+	if err := os.MkdirAll(themeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(themeDir, "colors.toml"), []byte(colors), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_STATE_HOME", dir)
+	if !theme.OmarchyAvailable() {
+		t.Fatal("fixture theme should be detected")
+	}
+}
 
 func sized() Model { return WithSize(New(), 100, 30) }
 
@@ -25,7 +74,7 @@ func TestBootFastForwardThenAuth(t *testing.T) {
 func TestAuthGuestToIdentity(t *testing.T) {
 	m := sized()
 	m.phase = phaseAuth
-	m = Key(m, "4") // continue as guest
+	m = Key(m, "3") // continue as guest
 	if m.phase != phaseIdentity {
 		t.Errorf("guest auth → phase %q, want identity", m.phase)
 	}
@@ -37,7 +86,7 @@ func TestAuthGuestToIdentity(t *testing.T) {
 func TestTokenFlow(t *testing.T) {
 	m := sized()
 	m.phase = phaseAuth
-	m = Key(m, "3") // paste a token
+	m = Key(m, "2") // paste a token
 	if m.phase != phaseToken {
 		t.Fatalf("phase = %q, want token", m.phase)
 	}
@@ -224,7 +273,7 @@ func TestTrainerCompletesAllDrills(t *testing.T) {
 }
 
 func TestFinishEmitsPrefs(t *testing.T) {
-	t.Setenv("HOME", t.TempDir()) // keep config.Save off the real config dir
+	isolateConfigDir(t)
 	m := Goto(WithSize(New(), 100, 30), phaseLaunch)
 	m.themeName = "midnight"
 	m.accent = "purple"
@@ -241,5 +290,162 @@ func TestFinishEmitsPrefs(t *testing.T) {
 	}
 	if fin.Prefs.Theme != "midnight" || fin.Prefs.Handle != "devon" || !fin.Prefs.Onboarded {
 		t.Errorf("prefs = %+v", fin.Prefs)
+	}
+}
+
+// isolateConfigDir points config.Dir() at a temp dir for the duration of a test.
+// Overriding only HOME is not enough: config.Dir() checks XDG_CONFIG_HOME first,
+// so on any desktop that sets it (most Linux distros) the test would read and
+// write the real ~/.config/slack-tui.
+func isolateConfigDir(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
+}
+
+// With no Slack app configured — the normal state for a fresh install, since
+// slack-tui isn't distributed through Slack — "Sign in with Slack" must set the
+// app up in place. It used to dump the user on the paste-a-token screen and
+// tell them to quit and run a CLI command.
+func TestSignInWithoutAppOffersSetup(t *testing.T) {
+	isolateConfigDir(t)
+	t.Setenv("SLACK_CLIENT_ID", "")
+	t.Setenv("SLACK_CLIENT_SECRET", "")
+
+	m := Key(Goto(WithSize(New(), 96, 30), phaseAuth), "1")
+	if m.phase != phaseAppSetup {
+		t.Fatalf("phase = %q, want %q", m.phase, phaseAppSetup)
+	}
+	view := Dump(m, 96, 30)
+	for _, want := range []string{"Client ID", "app manifest", "api.slack.com/apps"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("app-setup screen missing %q", want)
+		}
+	}
+}
+
+// A bad client ID must be reported in place and never written to disk — the
+// paste is one keystroke away from the App ID sitting just above it.
+func TestAppSetupRejectsBadClientID(t *testing.T) {
+	isolateConfigDir(t)
+	t.Setenv("SLACK_CLIENT_ID", "")
+	t.Setenv("SLACK_CLIENT_SECRET", "")
+
+	m := Key(Goto(WithSize(New(), 96, 30), phaseAuth), "1")
+	for _, k := range strings.Split("A,0,B,8,K,U,L,B,K,8,W,enter", ",") {
+		m = Key(m, k)
+	}
+	if m.phase != phaseAppSetup {
+		t.Errorf("should stay on the setup screen, got %q", m.phase)
+	}
+	if !strings.Contains(m.appSetupNote, "App ID") {
+		t.Errorf("note = %q, want the App ID hint", m.appSetupNote)
+	}
+	if got := config.LoadOAuthCreds(); got.ClientID != "" {
+		t.Errorf("a rejected id must not be saved, got %q", got.ClientID)
+	}
+}
+
+// Rendering must stay free of side effects: the clipboard write and the browser
+// launch hang off explicit keys, so tests and --dump-ob never clobber the user's
+// clipboard or open a window.
+func TestAppSetupRenderHasNoSideEffects(t *testing.T) {
+	isolateConfigDir(t)
+	prev := AppManifest
+	AppManifest = "" // as in any build that didn't inject it
+	t.Cleanup(func() { AppManifest = prev })
+	m := Goto(WithSize(New(), 96, 30), phaseAppSetup)
+	_ = Dump(m, 96, 30)
+	if m.appSetupNote != "" {
+		t.Errorf("rendering set a note (%q) — something ran that shouldn't have", m.appSetupNote)
+	}
+	// …and the copy key degrades gracefully when no manifest was injected.
+	m = Key(m, "ctrl+y")
+	if !strings.Contains(m.appSetupNote, "unavailable") {
+		t.Errorf("note = %q, want the unavailable-manifest message", m.appSetupNote)
+	}
+}
+
+// On a desktop that already dictates the palette, the wizard must not ask about
+// theme or accent — the answer would be overridden the moment it was given.
+func TestWizardSkipsColorStepsUnderOmarchy(t *testing.T) {
+	isolateConfigDir(t)
+	withOmarchyTheme(t, "mode = \"dark\"\nbackground = \"#1a1b26\"\nforeground = \"#a9b1d6\"\naccent = \"#7aa2f7\"\n")
+
+	m := WithSize(New(), 100, 30)
+	if got := m.steps; len(got) != 3 || got[0] != "density" {
+		t.Fatalf("steps = %v, want the colour steps dropped", got)
+	}
+	if m.themeName != theme.OmarchyName {
+		t.Errorf("themeName = %q, want %q", m.themeName, theme.OmarchyName)
+	}
+}
+
+// Everywhere else the pickers stay — most machines don't run Omarchy.
+func TestWizardKeepsColorStepsWithoutOmarchy(t *testing.T) {
+	isolateConfigDir(t)
+	m := WithSize(New(), 100, 30)
+	if got := m.steps; len(got) != 5 || got[0] != "theme" {
+		t.Fatalf("steps = %v, want the full list", got)
+	}
+	if m.themeName == theme.OmarchyName {
+		t.Error("should not follow a desktop theme that isn't there")
+	}
+}
+
+// The auth menu is short; a key past the end must be ignored rather than
+// panicking on an out-of-range option.
+func TestAuthKeyBeyondMenuIsIgnored(t *testing.T) {
+	m := sized()
+	m.phase = phaseAuth
+	for _, k := range []string{"4", "7", "9"} {
+		m = Key(m, k)
+		if m.phase != phaseAuth {
+			t.Fatalf("key %q moved to %q, want to stay on auth", k, m.phase)
+		}
+	}
+}
+
+// No auth option may claim to authenticate without doing so — the removed SSO
+// entry animated a fake sign-in and landed in the mock workspace.
+func TestNoSimulatedAuthOptions(t *testing.T) {
+	for _, o := range authOpts {
+		if o.id == "sso" {
+			t.Error("the simulated SSO option is back")
+		}
+	}
+	if len(authOpts) != 3 {
+		t.Errorf("authOpts = %d entries, want 3", len(authOpts))
+	}
+}
+
+// `slack-tui setup` signs in and saves tokens without touching prefs, so the
+// next launch still runs onboarding. It must not ask the user to authenticate
+// again minutes after they did.
+func TestOnboardingSkipsAuthWhenAlreadySignedIn(t *testing.T) {
+	isolateConfigDir(t)
+	if err := config.SaveWorkspace(config.Workspace{
+		Name: "acme", TeamID: "T1", Tokens: config.Tokens{User: "xoxp-already-signed-in"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	m := update(WithSize(New(), 100, 30), bootAdvanceMsg{})
+	if m.phase != phaseIdentity {
+		t.Fatalf("phase = %q, want %q — an existing token must skip the auth screen", m.phase, phaseIdentity)
+	}
+	if view := Dump(m, 100, 30); !strings.Contains(view, "acme") {
+		t.Errorf("identity screen should name the signed-in workspace:\n%s", view)
+	}
+}
+
+// With no token, the auth screen is still where boot leads.
+func TestOnboardingAsksForAuthWhenNotSignedIn(t *testing.T) {
+	isolateConfigDir(t)
+	t.Setenv("SLACK_USER_TOKEN", "")
+	m := update(WithSize(New(), 100, 30), bootAdvanceMsg{})
+	if m.phase != phaseAuth {
+		t.Fatalf("phase = %q, want %q", m.phase, phaseAuth)
 	}
 }

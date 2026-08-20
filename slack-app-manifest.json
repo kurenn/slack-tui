@@ -12,7 +12,11 @@
   },
   "oauth_config": {
     "redirect_urls": [
-      "http://localhost:9899/callback"
+      "http://localhost:9899/callback",
+      "http://localhost:9900/callback",
+      "http://localhost:9901/callback",
+      "http://localhost:9902/callback",
+      "http://localhost:9903/callback"
     ],
     "scopes": {
       "user": [

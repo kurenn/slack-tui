@@ -3,30 +3,65 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"regexp"
+	"strings"
 )
+
+// DefaultClientID is the client ID of the published slack-tui Slack app, so a
+// plain install can sign in with nothing configured. A client ID is public
+// information and there is no secret to go with it — the shipped app uses PKCE,
+// which is exactly the flow designed for binaries that can't keep a secret.
+//
+// Stamped at build time by goreleaser:
+//
+//	-X github.com/kurenn/slack-tui/internal/config.DefaultClientID=…
+//
+// Empty in `go build` / `go install` builds, which fall back to a user-supplied
+// app in oauth.json — same as before this existed.
+var DefaultClientID = ""
 
 // OAuthCreds are the Slack app credentials needed for the browser sign-in flow
 // (from the app's Basic Information page). They're separate from the issued
 // tokens — these identify the app, the tokens authenticate the user.
+//
+// Only the client ID is used. Sign-in is always PKCE, because Slack rejects a
+// loopback redirect without it, and a PKCE client must not send a secret at
+// all. ClientSecret is still parsed so a pre-existing oauth.json keeps loading
+// and we can tell the user their secret is now ignored.
 type OAuthCreds struct {
 	ClientID     string `json:"client_id"`
-	ClientSecret string `json:"client_secret"`
+	ClientSecret string `json:"client_secret,omitempty"`
 }
 
-func (c OAuthCreds) Ready() bool { return c.ClientID != "" && c.ClientSecret != "" }
+// Ready reports whether a browser sign-in can be attempted at all.
+func (c OAuthCreds) Ready() bool { return c.ClientID != "" }
 
-// LoadOAuthCreds reads app credentials from oauth.json, with env vars
-// (SLACK_CLIENT_ID / SLACK_CLIENT_SECRET) overriding.
+// clientIDRe matches Slack's client ID: two digit runs, dot-separated.
+var clientIDRe = regexp.MustCompile(`^\d{6,20}\.\d{6,20}$`)
+
+// ValidClientID reports whether s looks like a Slack client ID. Shared by
+// `slack-tui setup` and the onboarding screen so the two can't disagree about
+// what they accept. The App ID (A0B8…) sits directly above the Client ID on
+// Slack's page and is the usual mis-paste; it fails this.
+func ValidClientID(s string) bool { return clientIDRe.MatchString(strings.TrimSpace(s)) }
+
+// LoadOAuthCreds reads app credentials from oauth.json, falling back to the
+// built-in app, with env vars (SLACK_CLIENT_ID / SLACK_CLIENT_SECRET)
+// overriding. A user-supplied client ID drops the built-in one entirely rather
+// than pairing it with a foreign secret.
 func LoadOAuthCreds() OAuthCreds {
 	var c OAuthCreds
 	if b, err := readConfigFile("oauth.json"); err == nil {
 		_ = json.Unmarshal(b, &c)
 	}
 	if v := os.Getenv("SLACK_CLIENT_ID"); v != "" {
-		c.ClientID = v
+		c.ClientID, c.ClientSecret = v, ""
 	}
 	if v := os.Getenv("SLACK_CLIENT_SECRET"); v != "" {
 		c.ClientSecret = v
+	}
+	if c.ClientID == "" {
+		return OAuthCreds{ClientID: DefaultClientID}
 	}
 	return c
 }

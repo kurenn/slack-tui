@@ -177,6 +177,8 @@ func (m Model) stage(p theme.Palette) string {
 		return bootScreen(p, body)
 	case phaseAuth:
 		return bootScreen(p, m.viewAuth(p))
+	case phaseAppSetup:
+		return bootScreen(p, m.viewAppSetup(p))
 	case phaseToken:
 		return bootScreen(p, m.viewTokenForm(p))
 	case phaseIdentity:
@@ -185,7 +187,7 @@ func (m Model) stage(p theme.Palette) string {
 			lines = []tline{{text: "guest session — pick a display handle for this demo.", class: "dim"}}
 		} else {
 			lines = []tline{
-				{text: "authenticated ✓  ·  workspace @monospace-labs", class: "ok"},
+				{text: "authenticated ✓  ·  workspace @" + m.workspaceLabel(), class: "ok"},
 				{text: "choose how teammates will see you.", class: "dim"},
 			}
 		}
@@ -206,11 +208,20 @@ func (m Model) stage(p theme.Palette) string {
 
 // ── chrome ───────────────────────────────────────────────────────────────────
 
+// workspaceLabel is the real team name once OAuth has told us one, and the demo
+// workspace otherwise — a live sign-in used to be greeted by the mock's name.
+func (m Model) workspaceLabel() string {
+	if m.teamName != "" {
+		return m.teamName
+	}
+	return "monospace-labs"
+}
+
 func (m Model) titlebar(p theme.Palette) string {
 	bg := lipgloss.NewStyle().Background(p.TitlebarBg)
 	dim := bg.Foreground(p.Dim)
 	title := dim.Render("slack-tui — ") + bg.Foreground(p.Fg).Bold(true).Render("onboarding")
-	right := "monospace-labs"
+	right := m.workspaceLabel()
 	if h := m.handle.Value(); h != "" {
 		right = "@" + h
 	}
@@ -226,14 +237,14 @@ func (m Model) titlebar(p theme.Palette) string {
 func (m Model) statusbar(p theme.Palette) string {
 	bg := lipgloss.NewStyle().Background(p.StatusBg)
 	label := map[string]string{
-		phaseBoot: "BOOT", phaseAuth: "AUTH", phaseOAuth: "OAUTH", phaseToken: "TOKEN",
+		phaseBoot: "BOOT", phaseAuth: "AUTH", phaseOAuth: "OAUTH", phaseAppSetup: "APP", phaseToken: "TOKEN",
 		phaseIdentity: "IDENTITY", phaseWizard: "SETUP", phaseLaunch: "READY",
 	}[m.phase]
 	mode := lipgloss.NewStyle().Background(p.Accent).Foreground(p.Bg).Bold(true).Padding(0, 1).Render(label)
 
-	loc := "@monospace-labs"
+	loc := "@" + m.workspaceLabel()
 	if m.phase == phaseWizard {
-		loc = fmt.Sprintf("step %d / %d · %s", m.stepIndex+1, len(wizSteps), m.step())
+		loc = fmt.Sprintf("step %d / %d · %s", m.stepIndex+1, len(m.steps), m.step())
 	} else if h := m.handle.Value(); h != "" && m.phase != phaseAuth && m.phase != phaseOAuth {
 		loc = "@" + h
 	}
@@ -257,7 +268,9 @@ func (m Model) hints() [][2]string {
 	case phaseBoot, phaseOAuth:
 		return [][2]string{{"any key", "skip"}}
 	case phaseAuth:
-		return [][2]string{{"j/k", "choose"}, {"1-4", "jump"}, {"↵", "authenticate"}}
+		return [][2]string{{"j/k", "choose"}, {"1-3", "jump"}, {"↵", "authenticate"}}
+	case phaseAppSetup:
+		return [][2]string{{"^y", "copy manifest"}, {"^o", "open slack"}, {"↵", "sign in"}, {"esc", "back"}}
 	case phaseToken, phaseIdentity:
 		return [][2]string{{"↵", "continue"}}
 	case phaseLaunch:
@@ -356,6 +369,9 @@ func (m Model) viewTokenForm(p theme.Palette) string {
 		m.tlineRender(p, tline{text: "authenticate with access tokens", class: "fg"}),
 		m.tlineRender(p, tline{text: "user token is required; app + bot tokens enable live channel unread (optional).", class: "dim"}),
 	}
+	if m.tokenNote != "" {
+		head = append(head, m.tlineRender(p, tline{text: m.tokenNote, class: "warn"}))
+	}
 	labels := []string{"user token (xoxp):", "app token  (xapp):", "bot token  (xoxb):"}
 	views := []string{m.token.View(), m.appToken.View(), m.botToken.View()}
 	var rows []string
@@ -373,6 +389,30 @@ func (m Model) viewTokenForm(p theme.Palette) string {
 	}
 	hint := lipgloss.NewStyle().Foreground(p.Dim2).Render("tab switches fields · ↵ enter continues · stays on this machine")
 	return lipgloss.JoinVertical(lipgloss.Left, strings.Join(head, "\n"), "", strings.Join(rows, "\n"), "", hint)
+}
+
+// viewAppSetup walks the user through creating their own Slack app without
+// leaving the program. slack-tui isn't distributed through Slack, so this is the
+// ordinary path for a new install rather than a fallback.
+func (m Model) viewAppSetup(p theme.Palette) string {
+	head := []string{
+		m.tlineRender(p, tline{text: "connect your Slack workspace", class: "fg"}),
+		m.tlineRender(p, tline{text: "slack-tui signs in through an app you own — it takes about two minutes,", class: "dim"}),
+		m.tlineRender(p, tline{text: "and there's no client secret involved.", class: "dim"}),
+		"",
+		m.tlineRender(p, tline{text: "  1. ^y copies the app manifest to your clipboard", class: "fill"}),
+		m.tlineRender(p, tline{text: "  2. ^o opens api.slack.com/apps — Create New App → From an app manifest", class: "fill"}),
+		m.tlineRender(p, tline{text: "  3. paste it, create the app, then copy the Client ID below", class: "fill"}),
+	}
+	if m.appSetupNote != "" {
+		head = append(head, "", m.tlineRender(p, tline{text: m.appSetupNote, class: "warn"}))
+	}
+	label := lipgloss.NewStyle().Foreground(p.Green).Render("Client ID: ")
+	field := lipgloss.NewStyle().Foreground(p.Fg).Render(m.clientID.View()) +
+		lipgloss.NewStyle().Foreground(p.Accent).Render("▋")
+	hint := lipgloss.NewStyle().Foreground(p.Dim2).Render(
+		"Basic Information → App Credentials · ↵ signs in · esc goes back")
+	return lipgloss.JoinVertical(lipgloss.Left, strings.Join(head, "\n"), "", label+field, "", hint)
 }
 
 func (m Model) viewLogin(p theme.Palette, label, input string, lines []tline, hint string) string {
@@ -394,6 +434,8 @@ func (m Model) tlineRender(p theme.Palette, l tline) string {
 		s = s.Foreground(p.Accent).Bold(true)
 	case "ok":
 		s = s.Foreground(p.Green)
+	case "warn":
+		s = s.Foreground(p.Yellow)
 	case "fill":
 		s = s.Foreground(p.Dim2)
 	case "dim":

@@ -38,12 +38,23 @@ func versionString() string {
 }
 
 func main() {
+	// The onboarding app-setup screen offers the manifest for copying; go:embed
+	// only reaches files inside this package, so hand it over here.
+	onboarding.AppManifest = manifest
+
 	if len(os.Args) >= 2 && (os.Args[1] == "--version" || os.Args[1] == "-v" || os.Args[1] == "version") {
 		fmt.Println("slack-tui", versionString())
 		return
 	}
 	if len(os.Args) >= 2 && (os.Args[1] == "doctor" || os.Args[1] == "--doctor") {
 		os.Exit(doctor.Run(versionString()))
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "setup" {
+		if err := setup(); err != nil {
+			fmt.Fprintln(os.Stderr, "setup:", err)
+			os.Exit(1)
+		}
+		return
 	}
 	if len(os.Args) >= 2 && os.Args[1] == "login" {
 		if err := login(); err != nil {
@@ -105,15 +116,20 @@ func main() {
 func login() error {
 	creds := config.LoadOAuthCreds()
 	if !creds.Ready() {
-		return fmt.Errorf("missing app credentials — set SLACK_CLIENT_ID and SLACK_CLIENT_SECRET " +
-			"(from your Slack app's Basic Information), or put them in ~/.config/slack-tui/oauth.json")
+		return fmt.Errorf("no Slack app configured — run `slack-tui setup`, which walks you " +
+			"through creating one (or set SLACK_CLIENT_ID if you already have its client ID)")
+	}
+	if creds.ClientSecret != "" {
+		fmt.Println("note: a client secret is configured but no longer used — Slack requires PKCE")
+		fmt.Println("      for loopback redirects, and a PKCE client must not send one. Safe to remove.")
 	}
 	fmt.Println("Opening your browser to authorize slack-tui…")
-	fmt.Printf("If it doesn't open, visit:\n  %s\n\n", auth.AuthorizeURL(creds.ClientID, "manual"))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	toks, team, err := auth.Login(ctx, creds)
+	toks, team, err := auth.Login(ctx, creds, func(u string) {
+		fmt.Printf("If it doesn't open, visit:\n  %s\n\n", u)
+	})
 	if err != nil {
 		return err
 	}
@@ -121,7 +137,7 @@ func login() error {
 	if name == "" {
 		name = "default"
 	}
-	ws := config.Workspace{Name: name, TeamID: team.ID, Tokens: config.Tokens{User: toks.User, Bot: toks.Bot}}
+	ws := config.Workspace{Name: name, TeamID: team.ID, Tokens: toks}
 	if err := config.SaveWorkspace(ws); err != nil { // upserts; keeps a stored xapp token for this team
 		return err
 	}
@@ -129,6 +145,14 @@ func login() error {
 	if all, _, _ := config.LoadWorkspaces(); len(all) > 1 {
 		fmt.Println("  Switch workspaces in-app via Ctrl-K → \"Switch workspace\", or `slack-tui --workspace <name>`.")
 	}
-	fmt.Println("  (For live channel unread, also provide an app-level xapp token — OAuth can't issue it.)")
+	if toks.Rotating() {
+		// Expected: Slack forces rotation for a loopback redirect. Say what
+		// happens next rather than sounding an alarm — this is the normal path.
+		when := time.Unix(toks.ExpiresAt, 0)
+		fmt.Printf("  This token expires %s and is refreshed automatically — no action needed.\n",
+			when.Format("Mon 15:04"))
+	}
+	fmt.Println("  (For live channel unread, provide the app-level xapp AND bot xoxb tokens from your")
+	fmt.Println("   app's admin page — Slack issues neither through a loopback sign-in.)")
 	return nil
 }

@@ -16,19 +16,45 @@ import (
 	"github.com/kurenn/slack-tui/internal/theme"
 )
 
+// AppManifest is the Slack app manifest shown on the app-setup screen, injected
+// by package main (go:embed can only reach files inside its own package tree,
+// and the manifest is a repo-root file the README links to). Empty in tests and
+// --dump-ob renders, which simply offer nothing to copy.
+var AppManifest string
+
 // Phases of the flow.
 const (
 	phaseBoot     = "boot"
 	phaseAuth     = "auth"
 	phaseOAuth    = "oauth"
+	phaseAppSetup = "appsetup"
 	phaseToken    = "token"
 	phaseIdentity = "identity"
 	phaseWizard   = "wizard"
 	phaseLaunch   = "launch"
 )
 
-// Wizard steps.
-var wizSteps = []string{"theme", "accent", "density", "keyboard", "status"}
+// Wizard steps. Colour steps are dropped when the desktop already decides the
+// palette — see wizStepsFor.
+var allWizSteps = []string{"theme", "accent", "density", "keyboard", "status"}
+
+// wizStepsFor omits the theme/accent pickers when slack-tui is following the
+// Omarchy theme. Asking someone to choose colours that are then overridden by
+// their desktop is a question with no answer, so the steps go away rather than
+// becoming inert.
+func wizStepsFor(followsDesktop bool) []string {
+	if !followsDesktop {
+		return allWizSteps
+	}
+	out := make([]string, 0, len(allWizSteps))
+	for _, s := range allWizSteps {
+		if s == "theme" || s == "accent" {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
 
 // FinishedMsg is emitted when the user enters the workspace; it carries the
 // prefs to persist and hand to the app.
@@ -55,17 +81,23 @@ type Model struct {
 	status    string
 
 	handle     textinput.Model
+	clientID   textinput.Model // Slack app client ID, for the in-flow app setup
 	token      textinput.Model // user token (xoxp)
 	appToken   textinput.Model // app-level token (xapp) — Socket Mode
 	botToken   textinput.Model // bot token (xoxb) — Socket Mode
 	tokenField int             // which token input is focused (0=user,1=app,2=bot)
 
-	authSel  int
-	provider string
+	authSel      int
+	provider     string
+	tokenNote    string // why we landed on the paste-a-token screen, when we redirected here
+	appSetupNote string // feedback on the app-setup screen (copied / opened / bad id)
+	teamName     string // real workspace from OAuth; empty for the demo/mock path
 
 	oauthRunning bool   // real browser OAuth in flight
 	oauthErr     string // last OAuth failure, shown on the oauth screen
 
+	steps     []string // wizard steps for this run (colour steps may be omitted)
+	signedIn  bool     // a usable token already exists — skip the auth screen
 	stepIndex int
 	optSel    int
 	kbDone    bool
@@ -85,18 +117,40 @@ func New() Model {
 		ti.Prompt = ""
 		return ti
 	}
+	// On a desktop that publishes a palette, follow it outright rather than
+	// honouring a stored theme — config.Load() always returns a concrete theme
+	// name ("charcoal" by default), so deferring to it here would mean the
+	// desktop never won.
+	followsDesktop := theme.OmarchyAvailable()
+	themeName := orDefault(prefs.Theme, "charcoal")
+	if followsDesktop {
+		themeName = theme.OmarchyName
+	}
 	m := Model{
 		phase:     phaseBoot,
 		bootSpeed: "normal",
-		themeName: orDefault(prefs.Theme, "charcoal"),
+		steps:     wizStepsFor(followsDesktop),
+		themeName: themeName,
 		accent:    orDefault(prefs.Accent, "auto"),
 		density:   orDefault(prefs.Density, "comfortable"),
 		status:    orDefault(prefs.Status, "online"),
 		handle:    mk("handle"),
+		clientID:  mk("clientid"),
 		token:     mk("token"),
 		appToken:  mk("app"),
 		botToken:  mk("bot"),
 		trainer:   newTrainer(),
+	}
+	// `slack-tui setup` and `slack-tui login` sign in and save tokens without
+	// touching prefs, so the first launch afterwards still lands here. Asking
+	// someone to authenticate again, minutes after they just did, is the flow
+	// contradicting itself — skip straight past auth and keep the preferences.
+	if toks, err := config.LoadTokens(); err == nil && toks.Resolve().User != "" {
+		m.signedIn = true
+		m.provider = "slack"
+		if _, active, err := config.LoadWorkspaces(); err == nil && active != "" {
+			m.teamName = active
+		}
 	}
 	m.boot = newTypewriter(bootLines())
 	return m
@@ -132,6 +186,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tickMsg:
 		return m.onTick()
 	case bootAdvanceMsg:
+		if m.signedIn {
+			m.phase = phaseIdentity
+			return m, m.handle.Focus()
+		}
 		m.phase = phaseAuth
 		return m, nil
 	case advanceDrillMsg:
@@ -142,10 +200,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.oauthErr = msg.err.Error()
 			return m, nil
 		}
+		m.teamName = msg.team.Name
 		_ = config.SaveWorkspace(config.Workspace{
 			Name:   workspaceName(msg.team.Name),
 			TeamID: msg.team.ID,
-			Tokens: config.Tokens{User: msg.toks.User, Bot: msg.toks.Bot},
+			Tokens: msg.toks,
 		}) // SaveWorkspace keeps any stored app (xapp) token for this team
 		m.phase = phaseIdentity
 		return m, m.handle.Focus()

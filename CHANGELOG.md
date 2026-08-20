@@ -3,6 +3,52 @@
 slack-tui follows semver-ish tags; every release ships binaries for
 macOS/Linux/Windows plus a Homebrew formula via goreleaser.
 
+## v0.6.0
+
+- **Sign in from the browser, without a client secret** — `slack-tui setup`
+  creates your Slack app and signs you in: manifest to your clipboard, browser
+  opened, one prompt for the Client ID, done. Onboarding does the same three
+  steps in place, so picking "Sign in with Slack" no longer dead-ends on the
+  paste-a-token screen. Sign-in is PKCE, which Slack in fact *requires* for a
+  loopback redirect — so there is no client secret to handle anywhere, and any
+  left in `oauth.json` is ignored and can be deleted.
+- **Tokens refresh themselves** — Slack forces token rotation for a loopback
+  redirect regardless of the app's rotation setting, so the access token now
+  expires in ~12 hours. slack-tui renews it within 30 minutes of expiry, at
+  launch and on its poll loop, and `doctor` shows the time remaining. The
+  replacement is written to disk before it's used, so an interrupted refresh
+  costs nothing worse than one `slack-tui login`.
+- **Sign-in survives a busy port** — the callback used a single hardcoded 9899
+  and failed outright when anything held it, most often a previous sign-in whose
+  socket hadn't been released. It now takes the first free port in 9899–9903;
+  all five are registered in the manifest, and a test fails if code and manifest
+  drift.
+- **Follows your desktop theme on [Omarchy](https://omarchy.org)** — the palette
+  comes from the active theme and repaints when you run `omarchy theme set`, no
+  restart, light themes included. Onboarding skips the colour questions there,
+  since the desktop already answers them. Settings still pins a fixed palette,
+  and nothing changes off Omarchy.
+- **Onboarding tells the truth** — a real sign-in was greeted by the mock's name
+  ("workspace @monospace-labs") in three places; it now shows the workspace you
+  actually authorized. The "Single sign-on (SSO)" option is gone: it animated a
+  fake sign-in and dropped you in the demo workspace, which is fine in a
+  screenshot and misleading in a tool you install.
+- **Bot tokens for Socket Mode are now copied by hand** — Slack refuses bot
+  scopes on a loopback redirect, from any app, so the `xoxb-…` token joins the
+  `xapp-…` one as something you paste from your app's admin page. Live unread is
+  unchanged once both are set.
+- **Desktop notifications** — mentions, DMs and replies to your own threads now
+  raise a real notification (`notify-send` on Linux, `terminal-notifier` or
+  `osascript` on macOS) alongside the existing terminal bell, using the same
+  rule for what's worth interrupting for. Toggle in settings (`,`); a machine
+  with no notifier reports "Unavailable" rather than looking switched off.
+- **Setup instructions for agents** — [`docs/agent-setup.md`](docs/agent-setup.md)
+  walks a coding agent through installing and connecting slack-tui, and is
+  explicit about the two steps that need a human.
+- Fixed: `go test ./...` overwrote the real `~/.config/slack-tui` on any machine
+  with `XDG_CONFIG_HOME` set — which is most Linux desktops. Tests isolate both
+  that and the desktop-theme lookup now.
+
 ## v0.5.3
 
 - **Read state now actually reaches Slack** — `conversations.mark` needs a

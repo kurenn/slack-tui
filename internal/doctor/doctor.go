@@ -108,7 +108,10 @@ func reportConfig() {
 			fmt.Printf("  – %s (absent)\n", name)
 		}
 	}
-	if legacy := legacyConfigDir(); legacy != "" && dirHasFiles(legacy) {
+	// On Linux with XDG_CONFIG_HOME set, os.UserConfigDir() returns the very
+	// same path as config.Dir(), so the "legacy" dir is the current one and the
+	// warning is noise — in the first command people run when something's wrong.
+	if legacy := legacyConfigDir(); legacy != "" && legacy != dir && dirHasFiles(legacy) {
 		fmt.Printf("  ! legacy config also present at %s\n", legacy)
 		fmt.Println("    (reads fall back to it; writes go to the new dir)")
 	}
@@ -155,6 +158,27 @@ func reportTokens(file config.Tokens, env envValues) {
 		} else {
 			fmt.Printf("  %s%-4s %s  %s\n", marker, r.label, src, mask(eff))
 		}
+	}
+	reportRotation(file)
+}
+
+// reportRotation explains the expiry on a PKCE sign-in. Slack forces rotation
+// for the loopback redirect, so an expired token with no refresh token is the
+// one state that needs a re-login rather than a retry.
+func reportRotation(file config.Tokens) {
+	switch {
+	case !file.Rotating():
+		fmt.Println("  – user token does not expire (pasted by hand)")
+	case file.Refresh == "":
+		fmt.Println("  ✗ user token expires but has no refresh token — run `slack-tui login`")
+	default:
+		left := time.Until(time.Unix(file.ExpiresAt, 0))
+		if left <= 0 {
+			fmt.Println("  ! user token expired — it refreshes automatically on next launch")
+			return
+		}
+		fmt.Printf("  ✓ user token expires in %s (auto-refreshed within %s of expiry)\n",
+			left.Round(time.Minute), auth.RefreshSkew)
 	}
 }
 

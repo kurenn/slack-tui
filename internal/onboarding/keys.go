@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
+
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -19,11 +21,14 @@ type authOpt struct {
 	primary                    bool
 }
 
+// The old "Single sign-on (SSO)" entry was a typewriter animation that
+// authenticated nothing and dropped the user in the mock workspace. Harmless in
+// a demo, misleading in a tool strangers install — anyone at an SSO shop would
+// reach for it first.
 var authOpts = []authOpt{
 	{id: "slack", key: "1", mark: "#", label: "Sign in with Slack", hint: "oauth", primary: true},
-	{id: "sso", key: "2", mark: "⊞", label: "Single sign-on (SSO)", hint: "saml"},
-	{id: "token", key: "3", mark: "⊟", label: "Paste an auth token", hint: "xoxp-…"},
-	{id: "guest", key: "4", mark: "◇", label: "Continue as guest", hint: "demo"},
+	{id: "token", key: "2", mark: "⊟", label: "Paste an auth token", hint: "xoxp-…"},
+	{id: "guest", key: "3", mark: "◇", label: "Continue as guest", hint: "demo"},
 }
 
 var themeOpts = []struct{ val, name string }{
@@ -46,7 +51,7 @@ var statusOpts = []struct{ val, dot, label, desc string }{
 	{"dnd", "dnd", "Do not disturb", "mutes mentions & pages"},
 }
 
-func (m Model) step() string { return wizSteps[m.stepIndex] }
+func (m Model) step() string { return m.steps[m.stepIndex] }
 
 func optionCount(step string) int {
 	switch step {
@@ -92,6 +97,8 @@ func (m Model) onKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, m.handle.Focus()
 	case phaseAuth:
 		return m.authKey(k)
+	case phaseAppSetup:
+		return m.appSetupKey(msg)
 	case phaseToken:
 		return m.tokenKey(msg)
 	case phaseIdentity:
@@ -114,8 +121,11 @@ func (m Model) authKey(k string) (Model, tea.Cmd) {
 		m.authSel = clamp(m.authSel-1, 0, len(authOpts)-1)
 	case k == "enter":
 		return m.chooseAuth(authOpts[m.authSel])
-	case len(k) == 1 && k >= "1" && k <= "4":
+	case len(k) == 1 && k >= "1" && k <= "9":
 		n := int(k[0] - '1')
+		if n >= len(authOpts) {
+			return m, nil
+		}
 		m.authSel = n
 		return m.chooseAuth(authOpts[n])
 	}
@@ -132,27 +142,34 @@ func (m Model) chooseAuth(opt authOpt) (Model, tea.Cmd) {
 		m.phase = phaseIdentity
 		return m, m.handle.Focus()
 	case "slack":
-		if creds := config.LoadOAuthCreds(); creds.Ready() {
-			m.phase = phaseOAuth
-			m.oauthRunning = true
-			m.oauthErr = ""
-			m.oauth = newTypewriter([]tline{
-				{text: "[ oauth ] sign in with Slack", class: "accent"},
-				{text: "opening the authorization page in your browser…", class: "dim"},
-				{text: "  ↳ " + auth.RedirectURI, class: "fill"},
-				{text: "waiting for you to approve access in Slack…", class: "ok"},
-			})
-			return m, tea.Batch(tick(m.speedMS()), oauthCmd(creds))
+		creds := config.LoadOAuthCreds()
+		if !creds.Ready() {
+			// No app configured yet. Rather than bouncing to the token screen — or
+			// telling someone to quit the program they just launched — set the app
+			// up here. With slack-tui not distributed through Slack, this is the
+			// ordinary path for a new install, not an error case.
+			m.phase = phaseAppSetup
+			m.appSetupNote = ""
+			return m, m.clientID.Focus()
 		}
-		// No app credentials configured — fall back to pasting a token.
-		m.provider = "token"
-		m.phase = phaseToken
-		return m, m.focusToken(0)
-	default: // sso (simulated)
-		m.phase = phaseOAuth
-		m.oauth = newTypewriter(oauthLines(opt.id))
-		return m, tick(m.speedMS())
+		return m.startOAuth(creds)
 	}
+	return m, nil
+}
+
+// startOAuth switches to the waiting screen and kicks off the browser flow.
+func (m Model) startOAuth(creds config.OAuthCreds) (Model, tea.Cmd) {
+	m.phase = phaseOAuth
+	m.oauthRunning = true
+	m.oauthErr = ""
+	m.appSetupNote = ""
+	m.oauth = newTypewriter([]tline{
+		{text: "[ oauth ] sign in with Slack", class: "accent"},
+		{text: "opening the authorization page in your browser…", class: "dim"},
+		{text: "  ↳ " + auth.RedirectURIs()[0], class: "fill"},
+		{text: "waiting for you to approve access in Slack…", class: "ok"},
+	})
+	return m, tea.Batch(tick(m.speedMS()), oauthCmd(creds))
 }
 
 type oauthDoneMsg struct {
@@ -165,7 +182,7 @@ func oauthCmd(creds config.OAuthCreds) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
-		toks, team, err := auth.Login(ctx, creds)
+		toks, team, err := auth.Login(ctx, creds, nil)
 		return oauthDoneMsg{toks: toks, team: team, err: err}
 	}
 }
@@ -257,7 +274,7 @@ func (m Model) wizardKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) next() (Model, tea.Cmd) {
-	if m.stepIndex >= len(wizSteps)-1 {
+	if m.stepIndex >= len(m.steps)-1 {
 		m.phase = phaseLaunch
 		return m, nil
 	}
@@ -310,4 +327,54 @@ func (m Model) syncOpt() Model {
 		m.optSel = find(func(i int) string { return statusOpts[i].val }, len(statusOpts), m.status)
 	}
 	return m
+}
+
+// appSetupKey drives the in-flow Slack app setup: copy the manifest, open the
+// browser, paste the client ID. The two side-effecting actions are on explicit
+// keys rather than fired on entry, so rendering this screen (tests, --dump-ob)
+// never touches the user's clipboard or launches a browser.
+func (m Model) appSetupKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.phase = phaseAuth
+		m.appSetupNote = ""
+		return m, nil
+	case "ctrl+y":
+		if AppManifest == "" {
+			m.appSetupNote = "manifest unavailable in this build — copy it from the repo"
+			return m, nil
+		}
+		if err := clipboard.WriteAll(AppManifest); err != nil {
+			m.appSetupNote = "couldn't reach the clipboard — copy slack-app-manifest.json from the repo"
+			return m, nil
+		}
+		m.appSetupNote = "✓ manifest copied — paste it into \"From an app manifest\""
+		return m, nil
+	case "ctrl+o":
+		_ = auth.OpenBrowser("https://api.slack.com/apps")
+		m.appSetupNote = "opened api.slack.com/apps in your browser"
+		return m, nil
+	case "enter":
+		id := strings.TrimSpace(m.clientID.Value())
+		if id == "" {
+			return m, nil
+		}
+		if !config.ValidClientID(id) {
+			if strings.HasPrefix(id, "A") {
+				m.appSetupNote = "that's the App ID — you want the Client ID just below it"
+			} else {
+				m.appSetupNote = "doesn't look like a Client ID (e.g. 1234567890.9876543210)"
+			}
+			return m, nil
+		}
+		if err := config.SaveOAuthCreds(config.OAuthCreds{ClientID: id}); err != nil {
+			m.appSetupNote = "couldn't save: " + err.Error()
+			return m, nil
+		}
+		m.clientID.Blur()
+		return m.startOAuth(config.OAuthCreds{ClientID: id})
+	}
+	var cmd tea.Cmd
+	m.clientID, cmd = m.clientID.Update(msg)
+	return m, cmd
 }

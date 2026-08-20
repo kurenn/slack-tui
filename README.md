@@ -22,8 +22,8 @@ Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 - **Threads, reactions, edits** — open threads, react with any emoji, edit and delete your messages
 - **Autocomplete** — `@` pops handles (mentions actually ping), `:` pops emoji
 - **Fuzzy everything** — command palette (`Ctrl-K`), workspace search (`s`), channel browser & join
-- **Lives in the background** — Socket Mode live unread (self-healing), terminal bell on mentions, unread count in the terminal title, `── new ──` divider at first unread
-- **5 themes × 7 accents**, group DMs, per-conversation drafts, multi-line composer
+- **Lives in the background** — Socket Mode live unread (self-healing), desktop notifications + terminal bell on mentions and DMs, unread count in the terminal title, `── new ──` divider at first unread
+- **Follows your desktop theme** on [Omarchy](https://omarchy.org) — re-theme and the TUI repaints with it; 5 built-in themes × 7 accents everywhere else
 - **Mock workspace built in** — run it with zero setup to try the feel
 
 <div align="center">
@@ -62,6 +62,76 @@ slack-tui          # no token? you get a mock workspace to play with
 
 ## Connect to Slack
 
+```sh
+slack-tui setup
+```
+
+That's it. It copies the app manifest to your clipboard, opens
+api.slack.com/apps, waits while you paste it into your workspace, asks for the
+Client ID it gives you, and signs you in. Two minutes, once.
+
+Running `slack-tui` first works too — onboarding walks you through the same
+three steps without leaving the TUI.
+
+<details>
+<summary>Why you create an app at all</summary>
+
+slack-tui isn't distributed through Slack, and an undistributed Slack app can
+only be installed in the workspace that owns it. So there's no shared app to
+sign you in — each workspace needs its own. The upside is that the app is
+yours: it's not a third party you're trusting, and your messages never pass
+through anyone else's infrastructure.
+
+There's **no client secret** anywhere in this. Sign-in uses
+[PKCE](https://docs.slack.dev/authentication/using-pkce/), where the exchange is
+proved with a one-time verifier generated on your machine, so the only thing
+stored is a public client ID. Slack in fact *requires* PKCE here — a loopback
+redirect is a "non-web URI" and it refuses the sign-in without it.
+
+The browser redirect lands on `http://localhost:9899/callback` (or the next free
+port up to `9903`), so the token never leaves your machine. Tokens live in
+`~/.config/slack-tui/tokens.json` (0600); `SLACK_USER_TOKEN`, `SLACK_APP_TOKEN`
+and `SLACK_BOT_TOKEN` override per-token.
+
+</details>
+
+<details>
+<summary>Tokens expire after ~12 hours — slack-tui refreshes them</summary>
+
+Slack forces token rotation for a loopback redirect, regardless of the app's
+token-rotation setting, so there's no opting out. slack-tui renews the token
+within 30 minutes of expiry, at launch and again on its poll loop, so a session
+left running overnight keeps working. The refresh token is single-use and its
+replacement is written to disk before being used, so an interrupted refresh
+costs nothing worse than one `slack-tui login`. `slack-tui doctor` shows the
+time remaining. A hand-pasted `xoxp-…` token doesn't expire and is never
+refreshed.
+
+</details>
+
+> **Using an agent?** Point Claude Code (or similar) at
+> [`docs/agent-setup.md`](docs/agent-setup.md) and it will do the parts that can
+> be automated, stopping at the two clicks that need you.
+
+> Some workspaces require an admin to approve third-party apps. If sign-in comes
+> back denied, that's the wall you hit — ask your admin to approve it.
+
+### Socket Mode (live unread)
+
+Sign-in gets you a **user token**, and that runs everything except the live
+unread stream, which falls back to polling without one.
+
+Slack will not issue a bot token to this flow, from any app: a loopback redirect
+is a "non-web URI", and *"Bot scopes are not allowed when redirecting to a
+non-web URI."* So the two Socket Mode tokens are both copied by hand from your
+own app's admin page — the `xapp-…` app-level token and the `xoxb-…` bot token —
+and pasted into onboarding or set as `SLACK_APP_TOKEN` / `SLACK_BOT_TOKEN`.
+
+That's the only reason to create your own app. If you don't need live unread,
+you never need one.
+
+Prefer to do it by hand, or want to see what `setup` does?
+
 1. Create a Slack app from the manifest below
    (api.slack.com/apps → *Create New App* → *From a manifest* → paste it).
    It's also in the repo as [JSON](slack-app-manifest.json) and
@@ -85,7 +155,11 @@ slack-tui          # no token? you get a mock workspace to play with
   },
   "oauth_config": {
     "redirect_urls": [
-      "http://localhost:9899/callback"
+      "http://localhost:9899/callback",
+      "http://localhost:9900/callback",
+      "http://localhost:9901/callback",
+      "http://localhost:9902/callback",
+      "http://localhost:9903/callback"
     ],
     "scopes": {
       "user": [
@@ -143,25 +217,30 @@ slack-tui          # no token? you get a mock workspace to play with
 
 </details>
 
-2. Sign in with your browser:
+2. *OAuth & Permissions* → *Install to Workspace*, then copy the **Bot User
+   OAuth Token** (`xoxb-…`). *Basic Information* → *App-Level Tokens* →
+   generate one with `connections:write` for the `xapp-…` token.
+
+3. To sign in against your own app rather than the built-in one, set
+   `SLACK_CLIENT_ID` (from *Basic Information* → *App Credentials*), or put it
+   in `~/.config/slack-tui/oauth.json`:
 
 ```sh
-SLACK_CLIENT_ID=… SLACK_CLIENT_SECRET=… slack-tui login
+SLACK_CLIENT_ID=… slack-tui login
 ```
 
-…or pick **"Sign in with Slack"** in onboarding, or paste a user token
-(`xoxp-…`) directly. Tokens are stored in `~/.config/slack-tui/tokens.json`
-(0600). Env vars (`SLACK_USER_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_BOT_TOKEN`)
-override per-token.
+There is no client **secret** in any of this. Slack requires PKCE for loopback
+redirects, and a PKCE client must not send a secret — if you have one left in
+`oauth.json` from an older version, it is ignored and can be deleted.
 
 Run `slack-tui doctor` to diagnose your setup — it reports which tokens are
 in use (and warns when a stale env var overrides `tokens.json`), checks
 `auth.test`, flags any missing OAuth scopes, and probes Socket Mode. Tokens
 are masked in the output.
 
-For **live** channel unread, also generate an app-level token (`xapp-…`,
-Socket Mode) and invite the bot to the channels you care about — without it,
-unread badges refresh on a slow poll instead.
+Both Socket Mode tokens must be present, and the bot has to be invited to the
+channels you care about (`/invite @slack-tui`) — without that, unread badges
+refresh on a slow poll instead.
 
 **Multiple workspaces:** run `slack-tui login` once per workspace — each
 sign-in is saved under its team name. Switch in-app via `Ctrl-K` →
@@ -174,6 +253,30 @@ launch directly into one with `slack-tui --workspace <name>`.
 > from slack-tui. If you control the bot, filter on *its own* `bot_id` (or
 > `subtype == "bot_message"` / missing `user`) instead: a message with both
 > `user` and `bot_id` is a human talking through an API client.
+
+## Notifications
+
+Mentions, DMs and replies to your own threads raise a desktop notification —
+`notify-send` on Linux (so it goes through the Omarchy shell's notification
+service), `terminal-notifier` or `osascript` on macOS. Machines without a
+notification daemon simply don't get them; the terminal bell and the unread
+count in the window title still fire.
+
+Turn them off in settings (`,`) → *Notifications*. The setting reads
+"Unavailable" rather than "On" when the machine has no notifier, so a silent
+desktop isn't mistaken for a misconfiguration.
+
+## Theming
+
+On [Omarchy](https://omarchy.org), slack-tui reads the active desktop palette
+from `~/.local/state/omarchy/current/theme/colors.toml` and repaints when you
+run `omarchy theme set …` — no restart, and light themes work as well as dark.
+A fresh install picks this up automatically and onboarding skips the colour
+questions, since the desktop already answers them.
+
+To pin a fixed palette instead, choose one of the 5 built-in themes in settings
+(`,`) — that overrides the desktop and is what gets saved. Everywhere other than
+Omarchy, the built-in themes are the only option and nothing changes.
 
 ## Keys
 

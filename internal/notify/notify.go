@@ -24,6 +24,13 @@ var (
 	enabled bool
 )
 
+// goos and lookPath are seams so tests can select a platform and fake which
+// notifier binaries are "installed" without touching the real PATH or OS.
+var (
+	goos     = runtime.GOOS
+	lookPath = exec.LookPath
+)
+
 // Available reports whether this machine can show notifications, so callers can
 // tell "turned off" apart from "not possible here".
 func Available() bool {
@@ -43,17 +50,17 @@ func Send(title, body string) {
 }
 
 func detect() {
-	switch runtime.GOOS {
+	switch goos {
 	case "darwin":
 		// terminal-notifier gives a real app identity and a clickable
 		// notification; osascript is the fallback that's always present.
-		if path, err := exec.LookPath("terminal-notifier"); err == nil {
+		if path, err := lookPath("terminal-notifier"); err == nil {
 			enabled, sendFn = true, func(title, body string) {
 				run(path, "-title", appName, "-subtitle", title, "-message", body)
 			}
 			return
 		}
-		if path, err := exec.LookPath("osascript"); err == nil {
+		if path, err := lookPath("osascript"); err == nil {
 			enabled, sendFn = true, func(title, body string) {
 				// osascript takes a script, not argv, so both fields are quoted
 				// — a message containing a quote would otherwise end the string
@@ -67,7 +74,7 @@ func detect() {
 		// No dependency-free toast worth the complexity; the terminal bell and
 		// the window title still carry the alert.
 	default: // linux, bsd — the freedesktop spec
-		if path, err := exec.LookPath("notify-send"); err == nil {
+		if path, err := lookPath("notify-send"); err == nil {
 			enabled, sendFn = true, func(title, body string) {
 				run(path, "--app-name="+appName, "--urgency=normal", title, body)
 			}

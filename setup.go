@@ -4,6 +4,7 @@ import (
 	"bufio"
 	_ "embed"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,7 +58,7 @@ func setup() error {
 	// 2. Collect the client ID. No secret: sign-in is PKCE, which never sends one.
 	fmt.Println("Step 2 — copy the Client ID from Basic Information → App Credentials")
 	fmt.Println("  (the Client ID only — slack-tui never needs your client secret)")
-	id, err := promptClientID()
+	id, err := promptClientID(os.Stdin)
 	if err != nil {
 		return err
 	}
@@ -79,9 +80,11 @@ func setup() error {
 }
 
 // promptClientID reads and validates the client ID, re-asking on a bad paste
-// rather than failing a multi-step flow at the last step.
-func promptClientID() (string, error) {
-	in := bufio.NewScanner(os.Stdin)
+// rather than failing a multi-step flow at the last step. r is os.Stdin in
+// production; tests pass a strings.Reader so the prompt loop is exercisable
+// without a terminal.
+func promptClientID(r io.Reader) (string, error) {
+	in := bufio.NewScanner(r)
 	for attempt := 0; attempt < 5; attempt++ {
 		fmt.Print("  Client ID: ")
 		if !in.Scan() {

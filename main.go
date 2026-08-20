@@ -37,37 +37,43 @@ func versionString() string {
 	return version
 }
 
-func main() {
+// run dispatches on argv and returns the process exit code plus whether the
+// interactive TUI should be launched. It never constructs a tea.Program
+// itself — main() is the sole caller of tea.NewProgram — so every branch
+// below is exercisable in tests without starting a real Bubble Tea program.
+// A malformed --dump/--dump-ob size falls through to launch=true, matching
+// today's behavior of starting the TUI rather than erroring.
+func run(args []string) (code int, launch bool) {
 	// The onboarding app-setup screen offers the manifest for copying; go:embed
 	// only reaches files inside this package, so hand it over here.
 	onboarding.AppManifest = manifest
 
-	if len(os.Args) >= 2 && (os.Args[1] == "--version" || os.Args[1] == "-v" || os.Args[1] == "version") {
+	if len(args) >= 2 && (args[1] == "--version" || args[1] == "-v" || args[1] == "version") {
 		fmt.Println("slack-tui", versionString())
-		return
+		return 0, false
 	}
-	if len(os.Args) >= 2 && (os.Args[1] == "doctor" || os.Args[1] == "--doctor") {
-		os.Exit(doctor.Run(versionString()))
+	if len(args) >= 2 && (args[1] == "doctor" || args[1] == "--doctor") {
+		return doctor.Run(versionString()), false
 	}
-	if len(os.Args) >= 2 && os.Args[1] == "setup" {
+	if len(args) >= 2 && args[1] == "setup" {
 		if err := setup(); err != nil {
 			fmt.Fprintln(os.Stderr, "setup:", err)
-			os.Exit(1)
+			return 1, false
 		}
-		return
+		return 0, false
 	}
-	if len(os.Args) >= 2 && os.Args[1] == "login" {
+	if len(args) >= 2 && args[1] == "login" {
 		if err := login(); err != nil {
 			fmt.Fprintln(os.Stderr, "login:", err)
-			os.Exit(1)
+			return 1, false
 		}
-		return
+		return 0, false
 	}
 	// `slack-tui --workspace <name>` opens a specific workspace for this run
 	// only (the in-app switcher persists; the flag deliberately doesn't).
-	if len(os.Args) >= 3 && os.Args[1] == "--workspace" {
-		config.ActiveOverride = os.Args[2]
-		os.Args = append(os.Args[:1], os.Args[3:]...)
+	if len(args) >= 3 && args[1] == "--workspace" {
+		config.ActiveOverride = args[2]
+		args = append(args[:1], args[3:]...)
 	}
 	// FORCE_COLOR makes --dump emit truecolor even without a TTY (for piping a
 	// colored frame into a renderer like `freeze`).
@@ -77,32 +83,41 @@ func main() {
 
 	// Hidden dev flag: `slack-tui --dump 100x30` renders one frame to stdout and
 	// exits — used for headless verification and screenshots.
-	if len(os.Args) >= 3 && os.Args[1] == "--dump" {
+	if len(args) >= 3 && args[1] == "--dump" {
 		var w, h int
-		if _, err := fmt.Sscanf(os.Args[2], "%dx%d", &w, &h); err == nil {
+		if _, err := fmt.Sscanf(args[2], "%dx%d", &w, &h); err == nil {
 			m := app.WithSize(app.New(), w, h)
-			if len(os.Args) >= 4 { // replay comma-separated keys, e.g. "k,k,t" or "ctrl+k,d,e"
-				for _, key := range strings.Split(os.Args[3], ",") {
+			if len(args) >= 4 { // replay comma-separated keys, e.g. "k,k,t" or "ctrl+k,d,e"
+				for _, key := range strings.Split(args[3], ",") {
 					m = app.Key(m, key)
 				}
 			}
 			fmt.Println(app.Dump(m, w, h))
-			return
+			return 0, false
 		}
 	}
 	// `slack-tui --dump-ob 90x28 wizard:theme` renders an onboarding phase.
-	if len(os.Args) >= 4 && os.Args[1] == "--dump-ob" {
+	if len(args) >= 4 && args[1] == "--dump-ob" {
 		var w, h int
-		if _, err := fmt.Sscanf(os.Args[2], "%dx%d", &w, &h); err == nil {
-			m := onboarding.Goto(onboarding.New(), os.Args[3])
-			if len(os.Args) >= 5 {
-				for _, key := range strings.Split(os.Args[4], ",") {
+		if _, err := fmt.Sscanf(args[2], "%dx%d", &w, &h); err == nil {
+			m := onboarding.Goto(onboarding.New(), args[3])
+			if len(args) >= 5 {
+				for _, key := range strings.Split(args[4], ",") {
 					m = onboarding.Key(m, key)
 				}
 			}
 			fmt.Println(onboarding.Dump(m, w, h))
-			return
+			return 0, false
 		}
+	}
+
+	return 0, true
+}
+
+func main() {
+	code, launch := run(os.Args)
+	if !launch {
+		os.Exit(code)
 	}
 
 	p := tea.NewProgram(root.New(), tea.WithAltScreen(), tea.WithMouseCellMotion())

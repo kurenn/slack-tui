@@ -47,7 +47,11 @@ const (
 	// TestRedirectURIsMatchManifest enforces it.
 	portFirst = 9899
 	portCount = 5
+)
 
+// authorizeURL and accessURL are vars, not consts, so tests can repoint them
+// at an httptest.Server and exercise the real HTTP round trip hermetically.
+var (
 	authorizeURL = "https://slack.com/oauth/v2/authorize"
 	accessURL    = "https://slack.com/api/oauth.v2.access"
 )
@@ -181,7 +185,7 @@ func Login(ctx context.Context, creds config.OAuthCreds, onURL func(string)) (co
 	if onURL != nil {
 		onURL(authURL)
 	}
-	_ = openBrowser(authURL) // non-fatal; callers offer the URL via onURL
+	_ = browserOpen(authURL) // non-fatal; callers offer the URL via onURL
 
 	select {
 	case <-ctx.Done():
@@ -277,6 +281,10 @@ func randHex() (string, error) {
 // OpenBrowser launches the user's default browser. Exported so the setup
 // command can reuse it instead of keeping a second copy of the per-OS table.
 func OpenBrowser(u string) error { return openBrowser(u) }
+
+// browserOpen is a var so tests can capture the authorize URL instead of
+// spawning a real browser process.
+var browserOpen = openBrowser
 
 func openBrowser(u string) error {
 	switch runtime.GOOS {

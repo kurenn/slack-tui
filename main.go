@@ -146,8 +146,11 @@ func login() error {
 		fmt.Println("  Switch workspaces in-app via Ctrl-K → \"Switch workspace\", or `slack-tui --workspace <name>`.")
 	}
 	if toks.Rotating() {
-		fmt.Println("  ! Slack issued a rotating user token — slack-tui can't refresh it yet, so you'll")
-		fmt.Println("    need to run `slack-tui login` again when it expires. Please report this.")
+		// Expected: Slack forces rotation for a loopback redirect. Say what
+		// happens next rather than sounding an alarm — this is the normal path.
+		when := time.Unix(toks.ExpiresAt, 0)
+		fmt.Printf("  This token expires %s and is refreshed automatically — no action needed.\n",
+			when.Format("Mon 15:04"))
 	}
 	fmt.Println("  (For live channel unread, provide the app-level xapp AND bot xoxb tokens from your")
 	fmt.Println("   app's admin page — Slack issues neither through a loopback sign-in.)")

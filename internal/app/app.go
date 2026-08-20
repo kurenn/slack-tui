@@ -156,13 +156,14 @@ type Model struct {
 	attachInput  textinput.Model
 	uploadNote   string // transient "uploading…" note above the composer
 
-	newMark       map[string]string // convID → first-unread message ID (the ── new ── rule)
-	pendingUnread map[string]int    // unread count snapshot for channels opening async
-	readSeq       int               // bumped each time a conversation is opened/read
-	readSeqOf     map[string]int    // convID → readSeq when last read; guards stale unread polls
-	dmPollOffset  int               // rotating window cursor over the dormant DM tail
-	pendingSelect map[string]string // convID → message ID to select once history lands
-	pendingThread map[string]string // convID → root ID to open as a thread once history lands
+	newMark        map[string]string // convID → first-unread message ID (the ── new ── rule)
+	pendingUnread  map[string]int    // unread count snapshot for channels opening async
+	readSeq        int               // bumped each time a conversation is opened/read
+	readSeqOf      map[string]int    // convID → readSeq when last read; guards stale unread polls
+	dmPollOffset   int               // rotating window cursor over the dormant DM tail
+	chanPollOffset int               // rotating window cursor over the dormant channel tail
+	pendingSelect  map[string]string // convID → message ID to select once history lands
+	pendingThread  map[string]string // convID → root ID to open as a thread once history lands
 
 	seenReplies map[string]int // (convID+"|"+rootID) → reply count last seen, for the threads inbox "new" badge
 
@@ -453,7 +454,7 @@ func NewWith(src source.Source, prefs config.Prefs) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{pollTick(), themeWatchTick()}
+	cmds := []tea.Cmd{pollTick(), themeWatchTick(), dmTailPollTick()}
 	if sl, ok := m.src.(*source.Slack); ok {
 		if sl.Events() != nil {
 			cmds = append(cmds, listenEvents(sl)) // live channel events
@@ -465,7 +466,7 @@ func (m Model) Init() tea.Cmd {
 		cmds = append(cmds, m.presenceCmd())    // immediate first fetch so dots are right at startup
 		// Immediate unread fetch so sidebar dots appear right after launch
 		// instead of waiting for the first poll tick (Load no longer blocks on it).
-		cmds = append(cmds, m.unreadCmd(m.chanIDs()), m.unreadCmd(m.dmIDs()))
+		cmds = append(cmds, m.unreadCmd(m.chanIDs()), m.unreadCmd(m.dmHeadIDs()), m.unreadCmd(m.dmTailIDs()))
 	}
 	return tea.Batch(cmds...)
 }
@@ -1021,11 +1022,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case dmPollMsg:
-		cmd := m.unreadCmd(m.dmIDs()) // reads the current rotation window…
-		m.dmPollOffset += dmPollTail  // …then advance it so next round covers fresh tail
-		return m, tea.Batch(dmPollTick(), cmd)
+		// The fast round covers only the recently-used head; the dormant tail
+		// rides the slower dmTailPollMsg so this stays inside the budget.
+		return m, tea.Batch(dmPollTick(), m.unreadCmd(m.dmHeadIDs()))
+	case dmTailPollMsg:
+		cmd := m.unreadCmd(m.dmTailIDs()) // reads the current rotation window…
+		m.dmPollOffset += dmPollTail      // …then advance it so next round covers fresh tail
+		return m, tea.Batch(dmTailPollTick(), cmd)
 	case chanPollMsg:
-		return m, tea.Batch(chanPollTick(), m.unreadCmd(m.chanIDs()))
+		cmd := m.unreadCmd(m.chanIDs())
+		m.chanPollOffset += chanPollTail
+		return m, tea.Batch(chanPollTick(), cmd)
 	case presencePollMsg:
 		return m, tea.Batch(presencePollTick(), m.presenceCmd())
 	case presenceUpdateMsg:

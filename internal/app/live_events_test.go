@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 
@@ -466,11 +467,24 @@ func TestUpdateTokenRefreshedMsgAppliesOrIgnores(t *testing.T) {
 // cover every dormant DM.
 func TestUpdateDMPollMsgAdvancesRotationOffset(t *testing.T) {
 	m := newSized()
+
+	// The fast round polls only the recently-used head, which is the same set
+	// every time — advancing the rotation here would skip dormant DMs.
 	before := m.dmPollOffset
 	next, cmd := m.Update(dmPollMsg{})
 	m = next.(Model)
 	if cmd == nil {
 		t.Fatal("dmPollMsg should return a command")
+	}
+	if m.dmPollOffset != before {
+		t.Errorf("the head round moved the rotation cursor to %d; only the tail round should", m.dmPollOffset)
+	}
+
+	// The slow round is what walks the dormant tail, so it must advance.
+	next, cmd = m.Update(dmTailPollMsg{})
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("dmTailPollMsg should return a command")
 	}
 	if m.dmPollOffset != before+dmPollTail {
 		t.Errorf("dmPollOffset = %d, want %d (advanced by dmPollTail)", m.dmPollOffset, before+dmPollTail)
@@ -607,4 +621,50 @@ func flFirstConvOfType(t *testing.T, m *Model, kind string) string {
 	}
 	t.Fatalf("mock workspace has no %q conversation to test with", kind)
 	return ""
+}
+
+// Channel unread polling was unbounded: every channel, every round. On a
+// workspace with ~30 channels that alone was 20 calls/min, and the total sweep
+// measured ~51/min against Slack's ~50/min Tier-3 ceiling — so rounds were
+// already aborting on 429s. It must now stay inside a fixed budget however many
+// channels exist, while still covering all of them over several rounds.
+func TestChannelPollIsBoundedAndCoversEverything(t *testing.T) {
+	m := newSized()
+	m.ws.Channels = nil
+	for i := 0; i < 120; i++ {
+		id := fmt.Sprintf("C%03d", i)
+		m.ws.Channels = append(m.ws.Channels, data.Conversation{ID: id, Type: "channel", Name: id})
+	}
+	m.activeID = "other"
+
+	covered := map[string]bool{}
+	for round := 0; round < 80; round++ {
+		ids := m.chanIDs()
+		if len(ids) > chanPollHead+chanPollTail {
+			t.Fatalf("round %d polled %d channels, over budget %d", round, len(ids), chanPollHead+chanPollTail)
+		}
+		for _, id := range ids {
+			covered[id] = true
+		}
+		m.chanPollOffset += chanPollTail
+	}
+	if len(covered) != 120 {
+		t.Errorf("rotation covered %d/120 channels; a channel never polled has a permanently stale badge", len(covered))
+	}
+}
+
+// The whole point of the rebalance: the sweep must fit Slack's Tier-3 budget.
+// This is arithmetic over the constants, so changing an interval without
+// re-checking the budget fails here rather than in production 429s.
+func TestPollBudgetFitsSlackTier3(t *testing.T) {
+	const tier3PerMin = 50.0
+	perMin := float64(dmPollHead)/dmPollInterval.Minutes() +
+		float64(dmPollTail)/dmTailPollInterval.Minutes() +
+		float64(chanPollHead+chanPollTail)/chanPollInterval.Minutes() +
+		1/pollInterval.Minutes() +
+		1/presencePollInterval.Minutes()
+	if perMin > tier3PerMin {
+		t.Errorf("poll budget is %.1f calls/min, over Slack's Tier-3 ceiling of %.0f", perMin, tier3PerMin)
+	}
+	t.Logf("poll budget: %.1f calls/min (ceiling %.0f)", perMin, tier3PerMin)
 }

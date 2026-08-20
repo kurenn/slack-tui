@@ -1,6 +1,7 @@
 package root
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -163,7 +164,18 @@ func TestInitInOnboardingModeDelegatesToOnboarding(t *testing.T) {
 	m := Model{mode: modeOnboarding, ob: onboarding.New()}
 	cmd := m.Init()
 	if cmd == nil {
-		t.Error("Init in onboarding mode should return onboarding's own init cmd, got nil")
+		t.Fatal("Init in onboarding mode returned no cmd")
+	}
+	// Running the cmd is the point: asserting only that it is non-nil passes
+	// for a regression that returns loadApp here, which would start loading the
+	// workspace — authenticated work — while onboarding is still on screen.
+	msg := cmd()
+	if _, bad := msg.(appReadyMsg); bad {
+		t.Fatal("Init delegated to loadApp during onboarding — the app must not load until onboarding finishes")
+	}
+	want := onboarding.New().Init()()
+	if got, wantT := reflect.TypeOf(msg), reflect.TypeOf(want); got != wantT {
+		t.Errorf("Init yielded %v, want onboarding's own init message %v", got, wantT)
 	}
 }
 

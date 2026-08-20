@@ -14,6 +14,7 @@ import (
 	"github.com/kurenn/slack-tui/internal/config"
 	"github.com/kurenn/slack-tui/internal/data"
 	"github.com/kurenn/slack-tui/internal/source"
+	"github.com/kurenn/slack-tui/internal/theme"
 )
 
 // This file drives end-to-end UX flows through the real Bubble Tea Update
@@ -989,14 +990,26 @@ func TestPickerFreePickAcceptsUnlistedEmoji(t *testing.T) {
 func TestSettingsCycleDensityGroupDMsNotifyHints(t *testing.T) {
 	m := newSized()
 
+	// Both directions against named, independently-specified values. Comparing
+	// prefs.Density to m.density.String() would compare two outputs of the same
+	// operation: a regression writing an unsupported density into both would
+	// still pass.
 	m.settingsSel = 2 // density
-	beforeDensity := m.density.String()
+	m.density = theme.ParseDensity("comfortable")
+	m.prefs.Density = "comfortable"
 	m.cycleSetting(1)
-	if m.density.String() == beforeDensity {
-		t.Error("cycling density should toggle compact/comfortable")
+	if got := m.density.String(); got != "compact" {
+		t.Errorf("comfortable + 1 = %q, want compact", got)
 	}
-	if m.prefs.Density != m.density.String() {
-		t.Errorf("prefs.Density should track the change, got %q want %q", m.prefs.Density, m.density.String())
+	if m.prefs.Density != "compact" {
+		t.Errorf("prefs.Density = %q, want compact persisted alongside", m.prefs.Density)
+	}
+	m.cycleSetting(-1)
+	if got := m.density.String(); got != "comfortable" {
+		t.Errorf("compact - 1 = %q, want comfortable", got)
+	}
+	if m.prefs.Density != "comfortable" {
+		t.Errorf("prefs.Density = %q, want comfortable", m.prefs.Density)
 	}
 
 	m.settingsSel = 4 // group DMs — the mock isn't a *source.Slack, so no reload cmd
@@ -1152,9 +1165,9 @@ func TestNormalizeDropPathVariants(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"", ""},
 		{"/plain/path", "/plain/path"},
-		{"file:///tmp/a%20b.txt", "/tmp/a b.txt"},      // no host: leading "/" kept, %20 decoded
-		{"file://host/tmp/file.txt", "/tmp/file.txt"},  // host stripped
-		{"~", home},                                    // bare ~ → home
+		{"file:///tmp/a%20b.txt", "/tmp/a b.txt"},     // no host: leading "/" kept, %20 decoded
+		{"file://host/tmp/file.txt", "/tmp/file.txt"}, // host stripped
+		{"~", home}, // bare ~ → home
 		{"~/docs/a.txt", filepath.Join(home, "docs/a.txt")},
 	}
 	for _, c := range cases {

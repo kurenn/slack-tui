@@ -14,4 +14,56 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go vet ./...
-      - run: go test ./...
+      - run: go test ./... -race -coverprofile=coverage.out -covermode=atomic
+
+      # A ratchet, not a target. It fails when coverage drops below the floor,
+      # so the number can only be raised deliberately — the failure mode we care
+      # about is a PR quietly eroding it, not one that misses an aspiration.
+      - name: coverage floor
+        env:
+          FLOOR: "45"
+        run: |
+          pct=$(go tool cover -func=coverage.out | awk '/^total:/ {print substr($3, 1, length($3)-1)}')
+          echo "total coverage: ${pct}% (floor ${FLOOR}%)" >> "$GITHUB_STEP_SUMMARY"
+          awk -v p="$pct" -v f="$FLOOR" 'BEGIN { exit !(p+0 < f+0) }' && {
+            echo "::error title=Coverage below floor::${pct}% < ${FLOOR}% — raise coverage or lower FLOOR deliberately"
+            exit 1
+          }
+          echo "coverage ${pct}% ≥ ${FLOOR}%"
+
+      # Tests must not touch the machine running them. This has regressed four
+      # times (real config dir, desktop theme, real tokens, the clipboard), each
+      # time passing on CI and failing on a maintainer's box or the reverse.
+      # A fresh runner can't detect that by passing, so assert it directly.
+      - name: tests stay hermetic
+        run: |
+          test ! -e "$HOME/.config/slack-tui" || {
+            echo "::error title=Tests wrote the real config dir::$HOME/.config/slack-tui exists after go test"
+            ls -la "$HOME/.config/slack-tui"; exit 1
+          }
+          echo "no config dir created by the test run"
+
+  # Coverage is reported per package so a PR that raises the total by padding a
+  # trivial package while eroding a load-bearing one is visible in review.
+  coverage-report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go test ./... -coverprofile=coverage.out
+      - name: per-package coverage
+        run: |
+          {
+            echo "### Coverage by package"
+            echo
+            echo "| package | coverage |"
+            echo "|---|---|"
+            go test ./... -cover 2>/dev/null \
+              | grep -v 'no test files' \
+              | sed -E 's#github.com/kurenn/slack-tui/?##; s/\s+coverage: /|/; s/ of statements//' \
+              | awk -F'|' 'NF==2 {printf "| %s | %s |\n", ($1==""?"main":$1), $2}'
+            echo
+            go tool cover -func=coverage.out | awk '/^total:/ {print "**Total: " $3 "**"}'
+          } >> "$GITHUB_STEP_SUMMARY"

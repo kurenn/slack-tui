@@ -9,33 +9,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/kurenn/slack-tui/internal/config"
+	"github.com/kurenn/slack-tui/internal/testenv"
 	"github.com/kurenn/slack-tui/internal/theme"
 )
 
-// TestMain points every lookup New() makes — the desktop theme, and the config
-// dir it reads tokens and prefs from — at empty directories, so results depend
-// only on what a test sets up.
-//
-// Both halves were learned the hard way. Without the state dir the suite passes
-// on CI and fails on any Omarchy box, where the colour steps are dropped.
-// Without the config dir it passes on a fresh checkout and fails on the
-// maintainer's machine, where a real signed-in token makes onboarding skip the
-// auth screen.
-func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "slack-tui-test")
-	if err != nil {
-		panic(err)
-	}
-	os.Setenv("XDG_STATE_HOME", filepath.Join(dir, "state"))
-	os.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "config"))
-	os.Setenv("HOME", dir)
-	for _, v := range []string{"SLACK_USER_TOKEN", "SLACK_APP_TOKEN", "SLACK_BOT_TOKEN", "SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET"} {
-		os.Unsetenv(v)
-	}
-	code := m.Run()
-	os.RemoveAll(dir)
-	os.Exit(code)
-}
+func TestMain(m *testing.M) { os.Exit(testenv.Pin(m)) }
 
 // withOmarchyTheme points the theme lookup at a fixture, for the tests that
 // need the desktop to be providing colours.

@@ -18,13 +18,34 @@ import (
 	"github.com/kurenn/slack-tui/internal/source"
 )
 
-// dmPollInterval refreshes DM unread counts — Socket Mode can't see personal DMs.
-const dmPollInterval = 45 * time.Second
+// Poll intervals are a rate-limit budget, not preferences. conversations.history
+// is Slack Tier 3 — roughly 50 requests/minute — and every unread count costs
+// one call. Measured against a real workspace (~30 channels, 15 polled DMs) the
+// previous values spent ~51/min: already over the ceiling, so rounds were
+// aborting mid-sweep on 429s and leaving counts stale. That is the same failure
+// v0.5.2 fixed for DMs, still present for channels, which polled every channel
+// every round with no bound at all.
+//
+// The budget is now spent where it changes what the user sees: DMs, which are
+// the thing that notifies. Channels are bounded like DMs and polled less often —
+// a stale badge on a channel nobody is looking at is the cheapest thing to give
+// up, and far cheaper than rate-limiting the whole sweep into uselessness.
+//
+//	DM head (10)          25s   24.0/min
+//	DM dormant tail (5)  120s    2.5/min
+//	channels (12)        120s    6.0/min
+//	active conversation    8s    7.5/min
+//	presence              60s    1.0/min
+//	                          ≈ 41/min
+const dmPollInterval = 25 * time.Second
+
+// dmTailPollInterval refreshes the dormant DMs the fast round skips.
+const dmTailPollInterval = 120 * time.Second
 
 // chanPollInterval refreshes channel unread counts when Socket Mode isn't
 // running (user token only) — without it the sidebar badges would freeze at
 // their startup values.
-const chanPollInterval = 90 * time.Second
+const chanPollInterval = 120 * time.Second
 
 // presencePollInterval refreshes the presence dots for DM partners. Tier-3
 // rate limit is generous for the small DM set, so 60s is safe and responsive.
@@ -32,6 +53,7 @@ const presencePollInterval = 60 * time.Second
 
 type (
 	dmPollMsg       struct{}
+	dmTailPollMsg   struct{}
 	chanPollMsg     struct{}
 	presencePollMsg struct{}
 	// unreadMsg carries the unread counts actually fetched this round (a
@@ -45,6 +67,10 @@ type (
 	// pushes the user's OWN presence and carries only an error).
 	presenceUpdateMsg struct{ statuses map[string]string }
 )
+
+func dmTailPollTick() tea.Cmd {
+	return tea.Tick(dmTailPollInterval, func(time.Time) tea.Msg { return dmTailPollMsg{} })
+}
 
 func dmPollTick() tea.Cmd {
 	return tea.Tick(dmPollInterval, func(time.Time) tea.Msg { return dmPollMsg{} })
@@ -109,22 +135,36 @@ func lastRealTS(msgs []data.Message) string {
 const (
 	dmPollHead = 10
 	dmPollTail = 5
+	// Channels get the same treatment DMs got in v0.5.2: the ones you actually
+	// use every round, the rest on a rotation.
+	chanPollHead = 8
+	chanPollTail = 4
 )
 
 // dmIDs / chanIDs list the conversations to poll, excluding the active one.
-func (m Model) dmIDs() []string {
+// dmHeadIDs is the fast round: the DMs you actually use. These are what carry
+// notification latency, so they get the short interval.
+func (m Model) dmHeadIDs() []string {
 	ordered := m.dmsByRecency() // recent-first; already excludes the active conv
-	if len(ordered) <= dmPollHead+dmPollTail {
+	if len(ordered) <= dmPollHead {
 		return ordered
 	}
-	tail := ordered[dmPollHead:]
-	picked := make([]string, 0, dmPollHead+dmPollTail)
-	picked = append(picked, ordered[:dmPollHead]...)
-	start := m.dmPollOffset % len(tail)
-	for i := 0; i < dmPollTail; i++ {
-		picked = append(picked, tail[(start+i)%len(tail)])
+	return ordered[:dmPollHead]
+}
+
+// dmTailIDs is the rotating window over dormant DMs, on the slow round.
+func (m Model) dmTailIDs() []string {
+	ordered := m.dmsByRecency()
+	if len(ordered) <= dmPollHead {
+		return nil
 	}
-	return picked
+	rest := ordered[dmPollHead:]
+	out := make([]string, 0, dmPollTail)
+	start := m.dmPollOffset % len(rest)
+	for i := 0; i < dmPollTail && i < len(rest); i++ {
+		out = append(out, rest[(start+i)%len(rest)])
+	}
+	return out
 }
 
 // dmsByRecency returns every DM's ID ordered most-recently-opened first (then
@@ -186,7 +226,24 @@ func (m Model) chanIDs() []string {
 			ids = append(ids, c.ID)
 		}
 	}
-	return ids
+	return boundedRotation(ids, chanPollHead, chanPollTail, m.chanPollOffset)
+}
+
+// boundedRotation returns the first head entries plus a rotating window of
+// tail entries from the remainder, so a long list still refreshes completely
+// over several rounds without any single round exceeding the budget.
+func boundedRotation(ids []string, head, tail, offset int) []string {
+	if len(ids) <= head+tail {
+		return ids
+	}
+	rest := ids[head:]
+	out := make([]string, 0, head+tail)
+	out = append(out, ids[:head]...)
+	start := offset % len(rest)
+	for i := 0; i < tail; i++ {
+		out = append(out, rest[(start+i)%len(rest)])
+	}
+	return out
 }
 
 // unreadCmd fetches unread counts for the given conversations, concurrently,

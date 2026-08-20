@@ -1204,7 +1204,9 @@ func TestDMPollBoundedAndRotates(t *testing.T) {
 
 	covered := map[string]bool{}
 	for round := 0; round < 60; round++ {
-		ids := m.dmIDs()
+		// head and tail are separate rounds now; together they must still stay
+		// inside the same per-sweep budget the v0.5.2 fix established.
+		ids := append(m.dmHeadIDs(), m.dmTailIDs()...)
 		if len(ids) > dmPollHead+dmPollTail {
 			t.Fatalf("round %d polled %d DMs, over budget %d", round, len(ids), dmPollHead+dmPollTail)
 		}

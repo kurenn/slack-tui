@@ -97,6 +97,7 @@ type Model struct {
 	oauthErr     string // last OAuth failure, shown on the oauth screen
 
 	steps     []string // wizard steps for this run (colour steps may be omitted)
+	signedIn  bool     // a usable token already exists — skip the auth screen
 	stepIndex int
 	optSel    int
 	kbDone    bool
@@ -140,6 +141,17 @@ func New() Model {
 		botToken:  mk("bot"),
 		trainer:   newTrainer(),
 	}
+	// `slack-tui setup` and `slack-tui login` sign in and save tokens without
+	// touching prefs, so the first launch afterwards still lands here. Asking
+	// someone to authenticate again, minutes after they just did, is the flow
+	// contradicting itself — skip straight past auth and keep the preferences.
+	if toks, err := config.LoadTokens(); err == nil && toks.Resolve().User != "" {
+		m.signedIn = true
+		m.provider = "slack"
+		if _, active, err := config.LoadWorkspaces(); err == nil && active != "" {
+			m.teamName = active
+		}
+	}
 	m.boot = newTypewriter(bootLines())
 	return m
 }
@@ -174,6 +186,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tickMsg:
 		return m.onTick()
 	case bootAdvanceMsg:
+		if m.signedIn {
+			m.phase = phaseIdentity
+			return m, m.handle.Focus()
+		}
 		m.phase = phaseAuth
 		return m, nil
 	case advanceDrillMsg:

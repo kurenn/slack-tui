@@ -12,16 +12,26 @@ import (
 	"github.com/kurenn/slack-tui/internal/theme"
 )
 
-// TestMain pins the desktop-theme lookup to an empty directory, so the wizard
-// has its full step list no matter what the machine running the tests has
-// installed. Without this the suite passes on CI and fails on any Omarchy
-// box — the colour steps are dropped there.
+// TestMain points every lookup New() makes — the desktop theme, and the config
+// dir it reads tokens and prefs from — at empty directories, so results depend
+// only on what a test sets up.
+//
+// Both halves were learned the hard way. Without the state dir the suite passes
+// on CI and fails on any Omarchy box, where the colour steps are dropped.
+// Without the config dir it passes on a fresh checkout and fails on the
+// maintainer's machine, where a real signed-in token makes onboarding skip the
+// auth screen.
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "slack-tui-state")
+	dir, err := os.MkdirTemp("", "slack-tui-test")
 	if err != nil {
 		panic(err)
 	}
-	os.Setenv("XDG_STATE_HOME", dir)
+	os.Setenv("XDG_STATE_HOME", filepath.Join(dir, "state"))
+	os.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "config"))
+	os.Setenv("HOME", dir)
+	for _, v := range []string{"SLACK_USER_TOKEN", "SLACK_APP_TOKEN", "SLACK_BOT_TOKEN", "SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET"} {
+		os.Unsetenv(v)
+	}
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
@@ -407,5 +417,35 @@ func TestNoSimulatedAuthOptions(t *testing.T) {
 	}
 	if len(authOpts) != 3 {
 		t.Errorf("authOpts = %d entries, want 3", len(authOpts))
+	}
+}
+
+// `slack-tui setup` signs in and saves tokens without touching prefs, so the
+// next launch still runs onboarding. It must not ask the user to authenticate
+// again minutes after they did.
+func TestOnboardingSkipsAuthWhenAlreadySignedIn(t *testing.T) {
+	isolateConfigDir(t)
+	if err := config.SaveWorkspace(config.Workspace{
+		Name: "acme", TeamID: "T1", Tokens: config.Tokens{User: "xoxp-already-signed-in"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	m := update(WithSize(New(), 100, 30), bootAdvanceMsg{})
+	if m.phase != phaseIdentity {
+		t.Fatalf("phase = %q, want %q — an existing token must skip the auth screen", m.phase, phaseIdentity)
+	}
+	if view := Dump(m, 100, 30); !strings.Contains(view, "acme") {
+		t.Errorf("identity screen should name the signed-in workspace:\n%s", view)
+	}
+}
+
+// With no token, the auth screen is still where boot leads.
+func TestOnboardingAsksForAuthWhenNotSignedIn(t *testing.T) {
+	isolateConfigDir(t)
+	t.Setenv("SLACK_USER_TOKEN", "")
+	m := update(WithSize(New(), 100, 30), bootAdvanceMsg{})
+	if m.phase != phaseAuth {
+		t.Fatalf("phase = %q, want %q", m.phase, phaseAuth)
 	}
 }

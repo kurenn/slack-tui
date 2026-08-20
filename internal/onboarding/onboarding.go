@@ -34,8 +34,27 @@ const (
 	phaseLaunch   = "launch"
 )
 
-// Wizard steps.
-var wizSteps = []string{"theme", "accent", "density", "keyboard", "status"}
+// Wizard steps. Colour steps are dropped when the desktop already decides the
+// palette — see wizStepsFor.
+var allWizSteps = []string{"theme", "accent", "density", "keyboard", "status"}
+
+// wizStepsFor omits the theme/accent pickers when slack-tui is following the
+// Omarchy theme. Asking someone to choose colours that are then overridden by
+// their desktop is a question with no answer, so the steps go away rather than
+// becoming inert.
+func wizStepsFor(followsDesktop bool) []string {
+	if !followsDesktop {
+		return allWizSteps
+	}
+	out := make([]string, 0, len(allWizSteps))
+	for _, s := range allWizSteps {
+		if s == "theme" || s == "accent" {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
 
 // FinishedMsg is emitted when the user enters the workspace; it carries the
 // prefs to persist and hand to the app.
@@ -77,6 +96,7 @@ type Model struct {
 	oauthRunning bool   // real browser OAuth in flight
 	oauthErr     string // last OAuth failure, shown on the oauth screen
 
+	steps     []string // wizard steps for this run (colour steps may be omitted)
 	stepIndex int
 	optSel    int
 	kbDone    bool
@@ -96,10 +116,20 @@ func New() Model {
 		ti.Prompt = ""
 		return ti
 	}
+	// On a desktop that publishes a palette, follow it outright rather than
+	// honouring a stored theme — config.Load() always returns a concrete theme
+	// name ("charcoal" by default), so deferring to it here would mean the
+	// desktop never won.
+	followsDesktop := theme.OmarchyAvailable()
+	themeName := orDefault(prefs.Theme, "charcoal")
+	if followsDesktop {
+		themeName = theme.OmarchyName
+	}
 	m := Model{
 		phase:     phaseBoot,
 		bootSpeed: "normal",
-		themeName: orDefault(prefs.Theme, "charcoal"),
+		steps:     wizStepsFor(followsDesktop),
+		themeName: themeName,
 		accent:    orDefault(prefs.Accent, "auto"),
 		density:   orDefault(prefs.Density, "comfortable"),
 		status:    orDefault(prefs.Status, "online"),

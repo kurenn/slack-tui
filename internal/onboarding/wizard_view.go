@@ -274,7 +274,7 @@ func distribute(w, n int) []int {
 func (m Model) stepRail(p theme.Palette) string {
 	var b strings.Builder
 	b.WriteString(lipgloss.NewStyle().Foreground(p.Dim2).Render("["))
-	for i := range wizSteps {
+	for i := range m.steps {
 		if i > 0 {
 			c := p.Dim2
 			if i <= m.stepIndex {
@@ -298,7 +298,7 @@ func (m Model) viewFooter(p theme.Palette, w int) string {
 		back = lipgloss.NewStyle().Foreground(p.Dim).Render("← back ") + lipgloss.NewStyle().Foreground(p.Dim2).Render("esc")
 	}
 	label := "continue ↵"
-	if m.stepIndex == len(wizSteps)-1 {
+	if m.stepIndex == len(m.steps)-1 {
 		label = "finish ↵"
 	}
 	button := lipgloss.NewStyle().Background(p.Accent).Foreground(p.Bg).Bold(true).Padding(0, 1).Render(label)

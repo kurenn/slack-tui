@@ -8,27 +8,29 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/kurenn/slack-tui/internal/theme"
 )
 
 // Prefs is the persisted preference set (the slacktui_prefs contract).
 type Prefs struct {
-	Handle    string `json:"handle"`
-	Theme     string `json:"theme"`
-	Accent    string `json:"accent"`
-	Font      string `json:"font"`
-	Density   string `json:"density"`
-	Status    string `json:"status"`
-	GroupDMs  bool   `json:"group_dms"` // include group DMs (mpims) in the sidebar
-	Onboarded bool   `json:"onboarded"`
-	TS          int64 `json:"ts"`
-	ThreadWidth int   `json:"thread_width,omitempty"`
+	Handle      string `json:"handle"`
+	Theme       string `json:"theme"`
+	Accent      string `json:"accent"`
+	Font        string `json:"font"`
+	Density     string `json:"density"`
+	Status      string `json:"status"`
+	GroupDMs    bool   `json:"group_dms"` // include group DMs (mpims) in the sidebar
+	Onboarded   bool   `json:"onboarded"`
+	TS          int64  `json:"ts"`
+	ThreadWidth int    `json:"thread_width,omitempty"`
 }
 
 // Defaults mirrors the app's TWEAK_DEFAULTS for a first run with no saved prefs.
 func Defaults() Prefs {
 	return Prefs{
 		Handle:      "you",
-		Theme:       "charcoal",
+		Theme:       defaultTheme(),
 		Accent:      "auto",
 		Font:        "JetBrains Mono",
 		Density:     "comfortable",
@@ -150,4 +152,14 @@ func merge(dst *Prefs, src Prefs) {
 	if src.ThreadWidth > 0 {
 		dst.ThreadWidth = src.ThreadWidth
 	}
+}
+
+// defaultTheme follows the desktop palette when one is published, so a fresh
+// install on such a system matches the rest of the desktop without being asked.
+// An explicit choice made later in Settings overrides it and is what gets saved.
+func defaultTheme() string {
+	if theme.OmarchyAvailable() {
+		return theme.OmarchyName
+	}
+	return "charcoal"
 }

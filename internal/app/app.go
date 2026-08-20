@@ -100,14 +100,15 @@ func (m *Model) syncComposerSizes() {
 
 // Model is the application state.
 type Model struct {
-	src       source.Source
-	ws        *data.Workspace
-	prefs     config.Prefs
-	tokens    config.Tokens // live credentials; refreshed in place when rotating
-	pal       theme.Palette
-	density   theme.Density
-	showHints bool
-	loadErr   error
+	src        source.Source
+	ws         *data.Workspace
+	prefs      config.Prefs
+	tokens     config.Tokens // live credentials; refreshed in place when rotating
+	themeStamp string        // Omarchy theme fingerprint, to notice a desktop re-theme
+	pal        theme.Palette
+	density    theme.Density
+	showHints  bool
+	loadErr    error
 
 	messages    map[string][]data.Message
 	fullyLoaded map[string]bool // conversations with no more older history
@@ -412,6 +413,7 @@ func NewWith(src source.Source, prefs config.Prefs) Model {
 		ws:              ws,
 		prefs:           prefs,
 		pal:             theme.Resolve(prefs.Theme, prefs.Accent),
+		themeStamp:      theme.OmarchyStamp(),
 		density:         theme.ParseDensity(prefs.Density),
 		showHints:       true,
 		loadErr:         loadErr,
@@ -450,7 +452,7 @@ func NewWith(src source.Source, prefs config.Prefs) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{pollTick()}
+	cmds := []tea.Cmd{pollTick(), themeWatchTick()}
 	if sl, ok := m.src.(*source.Slack); ok {
 		if sl.Events() != nil {
 			cmds = append(cmds, listenEvents(sl)) // live channel events
@@ -993,6 +995,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds := []tea.Cmd{pollTick(), m.refresh(), m.markReadCmd(m.activeID)}
 		if c := m.refreshTokenCmd(); c != nil {
 			cmds = append(cmds, c)
+		}
+		return m, tea.Batch(cmds...)
+	case themeWatchMsg:
+		cmds := []tea.Cmd{themeWatchTick()}
+		// Only the "omarchy" theme follows the desktop; an explicitly chosen
+		// built-in stays put when the desktop re-themes.
+		if m.prefs.Theme == theme.OmarchyName {
+			if stamp := theme.OmarchyStamp(); stamp != m.themeStamp {
+				m.themeStamp = stamp
+				m.pal = theme.Resolve(m.prefs.Theme, m.prefs.Accent)
+			}
 		}
 		return m, tea.Batch(cmds...)
 	case tokenRefreshedMsg:

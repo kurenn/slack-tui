@@ -23,7 +23,7 @@ Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 - **Autocomplete** — `@` pops handles (mentions actually ping), `:` pops emoji
 - **Fuzzy everything** — command palette (`Ctrl-K`), workspace search (`s`), channel browser & join
 - **Lives in the background** — Socket Mode live unread (self-healing), terminal bell on mentions, unread count in the terminal title, `── new ──` divider at first unread
-- **5 themes × 7 accents**, group DMs, per-conversation drafts, multi-line composer
+- **Follows your desktop theme** on [Omarchy](https://omarchy.org) — re-theme and the TUI repaints with it; 5 built-in themes × 7 accents everywhere else
 - **Mock workspace built in** — run it with zero setup to try the feel
 
 <div align="center">
@@ -244,6 +244,18 @@ launch directly into one with `slack-tui --workspace <name>`.
 > from slack-tui. If you control the bot, filter on *its own* `bot_id` (or
 > `subtype == "bot_message"` / missing `user`) instead: a message with both
 > `user` and `bot_id` is a human talking through an API client.
+
+## Theming
+
+On [Omarchy](https://omarchy.org), slack-tui reads the active desktop palette
+from `~/.local/state/omarchy/current/theme/colors.toml` and repaints when you
+run `omarchy theme set …` — no restart, and light themes work as well as dark.
+A fresh install picks this up automatically and onboarding skips the colour
+questions, since the desktop already answers them.
+
+To pin a fixed palette instead, choose one of the 5 built-in themes in settings
+(`,`) — that overrides the desktop and is what gets saved. Everywhere other than
+Omarchy, the built-in themes are the only option and nothing changes.
 
 ## Keys
 

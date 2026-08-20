@@ -617,3 +617,18 @@ func (m Model) refreshTokenCmd() tea.Cmd {
 		return tokenRefreshedMsg{toks: toks}
 	}
 }
+
+// themeWatchInterval is how often we look for a desktop theme change. It's a
+// single stat of colors.toml, so it can be frequent enough that re-theming
+// looks instant without costing anything.
+const themeWatchInterval = 2 * time.Second
+
+// themeWatchMsg asks the model to re-read the desktop theme.
+type themeWatchMsg struct{}
+
+// themeWatchTick polls rather than hooking `omarchy hook install theme-set`,
+// which would need per-machine setup and a way to signal every running client.
+// Polling keeps this working out of the box on any machine.
+func themeWatchTick() tea.Cmd {
+	return tea.Tick(themeWatchInterval, func(time.Time) tea.Msg { return themeWatchMsg{} })
+}

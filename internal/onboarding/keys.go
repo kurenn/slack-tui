@@ -48,7 +48,7 @@ var statusOpts = []struct{ val, dot, label, desc string }{
 	{"dnd", "dnd", "Do not disturb", "mutes mentions & pages"},
 }
 
-func (m Model) step() string { return wizSteps[m.stepIndex] }
+func (m Model) step() string { return m.steps[m.stepIndex] }
 
 func optionCount(step string) int {
 	switch step {
@@ -271,7 +271,7 @@ func (m Model) wizardKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) next() (Model, tea.Cmd) {
-	if m.stepIndex >= len(wizSteps)-1 {
+	if m.stepIndex >= len(m.steps)-1 {
 		m.phase = phaseLaunch
 		return m, nil
 	}

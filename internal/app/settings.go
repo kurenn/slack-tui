@@ -56,7 +56,8 @@ func (m Model) settingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) cycleSetting(dir int) tea.Cmd {
 	switch m.settingsSel {
 	case 0:
-		m.prefs.Theme = theme.Cycle[wrap(indexOf(theme.Cycle, m.prefs.Theme)+dir, len(theme.Cycle))]
+		cyc := theme.CycleFor(theme.OmarchyAvailable())
+		m.prefs.Theme = cyc[wrap(indexOf(cyc, m.prefs.Theme)+dir, len(cyc))]
 		m.pal = theme.Resolve(m.prefs.Theme, m.prefs.Accent)
 	case 1:
 		m.prefs.Accent = accentChoices[wrap(indexOfStr(accentChoices, m.prefs.Accent)+dir, len(accentChoices))]

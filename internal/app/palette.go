@@ -159,8 +159,9 @@ func (m *Model) runPalette(id string) tea.Cmd {
 	case id == "cmd:statustext":
 		return m.openStatusText()
 	case id == "cmd:theme":
-		i := indexOf(theme.Cycle, m.prefs.Theme)
-		m.prefs.Theme = theme.Cycle[(i+1)%len(theme.Cycle)]
+		cyc := theme.CycleFor(theme.OmarchyAvailable())
+		i := indexOf(cyc, m.prefs.Theme)
+		m.prefs.Theme = cyc[(i+1)%len(cyc)]
 		m.pal = theme.Resolve(m.prefs.Theme, m.prefs.Accent)
 	case id == "cmd:hints":
 		m.showHints = !m.showHints

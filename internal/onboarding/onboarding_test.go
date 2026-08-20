@@ -1,13 +1,49 @@
 package onboarding
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/kurenn/slack-tui/internal/config"
+	"github.com/kurenn/slack-tui/internal/theme"
 )
+
+// TestMain pins the desktop-theme lookup to an empty directory, so the wizard
+// has its full step list no matter what the machine running the tests has
+// installed. Without this the suite passes on CI and fails on any Omarchy
+// box — the colour steps are dropped there.
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "slack-tui-state")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("XDG_STATE_HOME", dir)
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+// withOmarchyTheme points the theme lookup at a fixture, for the tests that
+// need the desktop to be providing colours.
+func withOmarchyTheme(t *testing.T, colors string) {
+	t.Helper()
+	dir := t.TempDir()
+	themeDir := filepath.Join(dir, "omarchy", "current", "theme")
+	if err := os.MkdirAll(themeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(themeDir, "colors.toml"), []byte(colors), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_STATE_HOME", dir)
+	if !theme.OmarchyAvailable() {
+		t.Fatal("fixture theme should be detected")
+	}
+}
 
 func sized() Model { return WithSize(New(), 100, 30) }
 
@@ -318,5 +354,32 @@ func TestAppSetupRenderHasNoSideEffects(t *testing.T) {
 	m = Key(m, "ctrl+y")
 	if !strings.Contains(m.appSetupNote, "unavailable") {
 		t.Errorf("note = %q, want the unavailable-manifest message", m.appSetupNote)
+	}
+}
+
+// On a desktop that already dictates the palette, the wizard must not ask about
+// theme or accent — the answer would be overridden the moment it was given.
+func TestWizardSkipsColorStepsUnderOmarchy(t *testing.T) {
+	isolateConfigDir(t)
+	withOmarchyTheme(t, "mode = \"dark\"\nbackground = \"#1a1b26\"\nforeground = \"#a9b1d6\"\naccent = \"#7aa2f7\"\n")
+
+	m := WithSize(New(), 100, 30)
+	if got := m.steps; len(got) != 3 || got[0] != "density" {
+		t.Fatalf("steps = %v, want the colour steps dropped", got)
+	}
+	if m.themeName != theme.OmarchyName {
+		t.Errorf("themeName = %q, want %q", m.themeName, theme.OmarchyName)
+	}
+}
+
+// Everywhere else the pickers stay — most machines don't run Omarchy.
+func TestWizardKeepsColorStepsWithoutOmarchy(t *testing.T) {
+	isolateConfigDir(t)
+	m := WithSize(New(), 100, 30)
+	if got := m.steps; len(got) != 5 || got[0] != "theme" {
+		t.Fatalf("steps = %v, want the full list", got)
+	}
+	if m.themeName == theme.OmarchyName {
+		t.Error("should not follow a desktop theme that isn't there")
 	}
 }

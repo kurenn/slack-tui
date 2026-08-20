@@ -244,7 +244,7 @@ func (m Model) statusbar(p theme.Palette) string {
 
 	loc := "@" + m.workspaceLabel()
 	if m.phase == phaseWizard {
-		loc = fmt.Sprintf("step %d / %d · %s", m.stepIndex+1, len(wizSteps), m.step())
+		loc = fmt.Sprintf("step %d / %d · %s", m.stepIndex+1, len(m.steps), m.step())
 	} else if h := m.handle.Value(); h != "" && m.phase != phaseAuth && m.phase != phaseOAuth {
 		loc = "@" + h
 	}

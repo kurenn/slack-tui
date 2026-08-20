@@ -509,3 +509,102 @@ func TestUpdateChanAndPresencePollMsgsReturnCommands(t *testing.T) {
 		t.Fatal("presencePollMsg should return a command")
 	}
 }
+
+// ── alerts when Socket Mode isn't running ────────────────────────────────────
+
+// Every other alert path needs Socket Mode, which needs tokens a loopback
+// sign-in cannot obtain — so for most installs the poll is the ONLY thing that
+// can raise a notification. A DM whose count grows must alert.
+func TestPollAlertsOnGrowingDM(t *testing.T) {
+	m := newSized()
+	m.unreadPrimed = true
+	dm := flFirstConvOfType(t, &m, "dm")
+	mm := m.meta[dm]
+	mm.Unread = 0
+	m.meta[dm] = mm
+
+	cmds := m.pollAlerts(map[string]int{dm: 2}, m.readSeq)
+	if len(cmds) == 0 {
+		t.Fatal("a DM going 0 → 2 unread must alert; with no Socket Mode nothing else will")
+	}
+}
+
+// A count that hasn't moved must stay silent, or every 45s poll would re-alert
+// for as long as the conversation stays unread.
+func TestPollDoesNotRealertOnUnchangedCount(t *testing.T) {
+	m := newSized()
+	m.unreadPrimed = true
+	dm := flFirstConvOfType(t, &m, "dm")
+	mm := m.meta[dm]
+	mm.Unread = 3
+	m.meta[dm] = mm
+
+	if cmds := m.pollAlerts(map[string]int{dm: 3}, m.readSeq); len(cmds) != 0 {
+		t.Errorf("unchanged count alerted %d cmds, want silence", len(cmds))
+	}
+	if cmds := m.pollAlerts(map[string]int{dm: 2}, m.readSeq); len(cmds) != 0 {
+		t.Errorf("a shrinking count alerted %d cmds, want silence", len(cmds))
+	}
+}
+
+// The first round compares against counts from the initial load, which are
+// often zero — alerting there would greet the user with a notification per
+// unread conversation at every launch.
+func TestPollStaysSilentOnFirstRound(t *testing.T) {
+	m := newSized()
+	m.unreadPrimed = false
+	dm := flFirstConvOfType(t, &m, "dm")
+	mm := m.meta[dm]
+	mm.Unread = 0
+	m.meta[dm] = mm
+
+	if cmds := m.pollAlerts(map[string]int{dm: 5}, m.readSeq); len(cmds) != 0 {
+		t.Errorf("first round alerted %d cmds, want silence", len(cmds))
+	}
+	if !m.unreadPrimed {
+		t.Error("the first round must arm subsequent ones")
+	}
+}
+
+// The conversation on screen is being read; alerting about it is noise.
+func TestPollDoesNotAlertForActiveConversation(t *testing.T) {
+	m := newSized()
+	m.unreadPrimed = true
+	if cmds := m.pollAlerts(map[string]int{m.activeID: 9}, m.readSeq); len(cmds) != 0 {
+		t.Errorf("alerted for the active conversation (%d cmds)", len(cmds))
+	}
+}
+
+// Channels must NOT alert merely for growing — only a real mention counts, or a
+// busy channel would notify on every message. Growth schedules a scan instead.
+func TestPollChannelGrowthScansRatherThanAlerting(t *testing.T) {
+	m := newSized()
+	m.unreadPrimed = true
+	ch := flFirstConvOfType(t, &m, "channel")
+	mm := m.meta[ch]
+	mm.Unread = 0
+	m.meta[ch] = mm
+
+	cmds := m.pollAlerts(map[string]int{ch: 4}, m.readSeq)
+	if len(cmds) != 1 {
+		t.Fatalf("a grown channel should schedule exactly one mention scan, got %d cmds", len(cmds))
+	}
+	// The scan cmd must resolve to a mentionScanMsg, not fire an alert directly.
+	if _, ok := cmds[0]().(mentionScanMsg); !ok {
+		t.Error("channel growth alerted directly instead of scanning for a mention")
+	}
+}
+
+// flFirstConvOfType returns a conversation id of the given kind from the mock.
+func flFirstConvOfType(t *testing.T, m *Model, kind string) string {
+	t.Helper()
+	for _, list := range [][]data.Conversation{m.ws.Channels, m.ws.DMs} {
+		for _, c := range list {
+			if c.Type == kind && c.ID != m.activeID {
+				return c.ID
+			}
+		}
+	}
+	t.Fatalf("mock workspace has no %q conversation to test with", kind)
+	return ""
+}

@@ -100,15 +100,16 @@ func (m *Model) syncComposerSizes() {
 
 // Model is the application state.
 type Model struct {
-	src        source.Source
-	ws         *data.Workspace
-	prefs      config.Prefs
-	tokens     config.Tokens // live credentials; refreshed in place when rotating
-	themeStamp string        // Omarchy theme fingerprint, to notice a desktop re-theme
-	pal        theme.Palette
-	density    theme.Density
-	showHints  bool
-	loadErr    error
+	src          source.Source
+	ws           *data.Workspace
+	prefs        config.Prefs
+	tokens       config.Tokens // live credentials; refreshed in place when rotating
+	unreadPrimed bool          // first unread poll seen; before that, growth isn't news
+	themeStamp   string        // Omarchy theme fingerprint, to notice a desktop re-theme
+	pal          theme.Palette
+	density      theme.Density
+	showHints    bool
+	loadErr      error
 
 	messages    map[string][]data.Message
 	fullyLoaded map[string]bool // conversations with no more older history
@@ -1036,6 +1037,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case unreadMsg:
+		// Alerts are computed before the counts are written, since "did this
+		// conversation grow" is a comparison against the previous round.
+		alerts := m.pollAlerts(msg.counts, msg.seq)
 		for id, n := range msg.counts { // only ids actually fetched this round
 			if id == m.activeID {
 				continue
@@ -1053,7 +1057,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				delete(m.hidden, id) // resurface: new messages since hide time
 			}
 		}
-		return m, m.titleCmd()
+		return m, tea.Batch(append(alerts, m.titleCmd())...)
+	case mentionScanMsg:
+		if !msg.found {
+			return m, nil
+		}
+		mm := m.meta[msg.convID]
+		mm.Mention = true
+		m.meta[msg.convID] = mm
+		name := msg.convID
+		if c, ok := m.ws.Conversation(msg.convID); ok {
+			name = c.Name
+		}
+		return m, tea.Batch(bellCmd, m.notifyCmd(name, msg.author, msg.text))
 	case markedMsg:
 		// Every poll retries the mark, so a persistent failure (a token issued
 		// before the mark-read scopes) would banner forever — say it once.

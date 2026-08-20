@@ -318,4 +318,3 @@ func TestSlashLeaveOnlyWorksInChannels(t *testing.T) {
 		t.Errorf("/leave in a DM should flash the channel-only guard, got %v", m.loadErr)
 	}
 }
-

@@ -14,17 +14,34 @@ import (
 
 // Prefs is the persisted preference set (the slacktui_prefs contract).
 type Prefs struct {
-	Handle      string `json:"handle"`
-	Theme       string `json:"theme"`
-	Accent      string `json:"accent"`
-	Font        string `json:"font"`
-	Density     string `json:"density"`
-	Status      string `json:"status"`
-	GroupDMs    bool   `json:"group_dms"` // include group DMs (mpims) in the sidebar
+	Handle   string `json:"handle"`
+	Theme    string `json:"theme"`
+	Accent   string `json:"accent"`
+	Font     string `json:"font"`
+	Density  string `json:"density"`
+	Status   string `json:"status"`
+	GroupDMs bool   `json:"group_dms"` // include group DMs (mpims) in the sidebar
+	// Notify is "mentions" (the default: desktop notifications for mentions and
+	// DMs, matching the terminal bell) or "off". A string rather than a bool so
+	// an existing prefs.json without the key keeps the default — merge only
+	// overrides non-empty strings, whereas a missing bool would read as false
+	// and silently turn notifications off for everyone who already onboarded.
+	Notify      string `json:"notify,omitempty"`
 	Onboarded   bool   `json:"onboarded"`
 	TS          int64  `json:"ts"`
 	ThreadWidth int    `json:"thread_width,omitempty"`
 }
+
+// Notification modes for Prefs.Notify.
+const (
+	NotifyMentions = "mentions" // mentions and DMs — the same rule as the bell
+	NotifyOff      = "off"
+)
+
+// Notifications reports whether desktop notifications are wanted. An unset
+// value means the default, so prefs written before the setting existed still
+// get them.
+func (p Prefs) Notifications() bool { return p.Notify != NotifyOff }
 
 // Defaults mirrors the app's TWEAK_DEFAULTS for a first run with no saved prefs.
 func Defaults() Prefs {
@@ -35,6 +52,7 @@ func Defaults() Prefs {
 		Font:        "JetBrains Mono",
 		Density:     "comfortable",
 		Status:      "online",
+		Notify:      NotifyMentions,
 		Onboarded:   false,
 		ThreadWidth: 60,
 	}
@@ -145,6 +163,9 @@ func merge(dst *Prefs, src Prefs) {
 	}
 	if src.Status != "" {
 		dst.Status = src.Status
+	}
+	if src.Notify != "" {
+		dst.Notify = src.Notify
 	}
 	dst.GroupDMs = src.GroupDMs
 	dst.Onboarded = src.Onboarded

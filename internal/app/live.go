@@ -14,6 +14,7 @@ import (
 	"github.com/kurenn/slack-tui/internal/auth"
 	"github.com/kurenn/slack-tui/internal/config"
 	"github.com/kurenn/slack-tui/internal/data"
+	"github.com/kurenn/slack-tui/internal/notify"
 	"github.com/kurenn/slack-tui/internal/source"
 )
 
@@ -338,7 +339,7 @@ func (m *Model) applyInactiveEvent(ev source.Event) []tea.Cmd {
 	}
 	m.meta[ev.ConvID] = meta
 	if ev.Msg.MentionsMe || conv.Type == "dm" {
-		return []tea.Cmd{bellCmd}
+		return []tea.Cmd{bellCmd, m.notifyCmd(conv.Name, ev.Msg.UserID, ev.Msg.Text)}
 	}
 	return nil
 }
@@ -392,7 +393,11 @@ func (m *Model) applyActiveReply(ev source.Event) []tea.Cmd {
 		return nil
 	}
 	if mine && m.threadRootID != ev.ThreadTS {
-		return []tea.Cmd{bellCmd}
+		name := "thread"
+		if c, ok := m.ws.Conversation(ev.ConvID); ok {
+			name = c.Name
+		}
+		return []tea.Cmd{bellCmd, m.notifyCmd(name+" (thread)", ev.Msg.UserID, ev.Msg.Text)}
 	}
 	return nil
 }
@@ -488,7 +493,11 @@ func (m *Model) applyHistory(convID string, msgs []data.Message) []tea.Cmd {
 		if known && msg.ReplyCount > prev && msg.UserID == m.ws.MeID {
 			cmds = append(cmds, m.repliesCmd(convID, msg.ID))
 			if !rung && msg.ID != m.threadRootID { // an open thread is already in view
-				cmds = append(cmds, bellCmd)
+				name := "thread"
+				if c, ok := m.ws.Conversation(convID); ok {
+					name = c.Name
+				}
+				cmds = append(cmds, bellCmd, m.notifyCmd(name+" (thread)", "", "new reply to your message"))
 				rung = true
 			}
 		}
@@ -631,4 +640,36 @@ type themeWatchMsg struct{}
 // Polling keeps this working out of the box on any machine.
 func themeWatchTick() tea.Cmd {
 	return tea.Tick(themeWatchInterval, func(time.Time) tea.Msg { return themeWatchMsg{} })
+}
+
+// notifyCmd posts a desktop notification for a message the user isn't looking
+// at. It rides alongside bellCmd at exactly the same call sites, so there is one
+// definition of "worth interrupting for" — mentions, DMs, and replies to your
+// own threads — rather than two that can drift apart.
+//
+// Returns nil when notifications are off, which tea.Batch discards.
+func (m Model) notifyCmd(convName, userID, text string) tea.Cmd {
+	if !m.prefs.Notifications() {
+		return nil
+	}
+	title := convName
+	if body := strings.TrimSpace(text); body != "" {
+		if who := m.displayName(userID); who != "" {
+			body = who + ": " + body
+		}
+		return func() tea.Msg { notify.Send(title, body); return nil }
+	}
+	return nil
+}
+
+// displayName resolves a user id to a handle for the notification body, since a
+// raw U0… id would tell the reader nothing.
+func (m Model) displayName(userID string) string {
+	if userID == "" {
+		return ""
+	}
+	if u, ok := m.ws.Users[userID]; ok {
+		return u.Handle
+	}
+	return ""
 }

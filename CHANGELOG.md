@@ -37,6 +37,11 @@ macOS/Linux/Windows plus a Homebrew formula via goreleaser.
   scopes on a loopback redirect, from any app, so the `xoxb-…` token joins the
   `xapp-…` one as something you paste from your app's admin page. Live unread is
   unchanged once both are set.
+- **Desktop notifications** — mentions, DMs and replies to your own threads now
+  raise a real notification (`notify-send` on Linux, `terminal-notifier` or
+  `osascript` on macOS) alongside the existing terminal bell, using the same
+  rule for what's worth interrupting for. Toggle in settings (`,`); a machine
+  with no notifier reports "Unavailable" rather than looking switched off.
 - **Setup instructions for agents** — [`docs/agent-setup.md`](docs/agent-setup.md)
   walks a coding agent through installing and connecting slack-tui, and is
   explicit about the two steps that need a human.

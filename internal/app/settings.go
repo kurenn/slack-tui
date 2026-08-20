@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/kurenn/slack-tui/internal/config"
+	"github.com/kurenn/slack-tui/internal/notify"
 	"github.com/kurenn/slack-tui/internal/source"
 	"github.com/kurenn/slack-tui/internal/theme"
 	"github.com/kurenn/slack-tui/internal/ui/components"
@@ -21,7 +22,7 @@ var (
 	statusChoices  = []string{"online", "away", "dnd"}
 )
 
-const settingsRows = 6
+const settingsRows = 7
 
 func (m *Model) openSettings()  { m.settingsOpen, m.settingsSel = true, 0 }
 func (m *Model) closeSettings() { m.settingsOpen = false; _ = config.Save(m.prefs) }
@@ -75,7 +76,13 @@ func (m *Model) cycleSetting(dir int) tea.Cmd {
 			sl.SetGroupDMs(m.prefs.GroupDMs)
 			return m.reloadCmd()
 		}
-	case 5:
+	case 5: // desktop notifications
+		if m.prefs.Notifications() {
+			m.prefs.Notify = config.NotifyOff
+		} else {
+			m.prefs.Notify = config.NotifyMentions
+		}
+	case 6:
 		m.showHints = !m.showHints
 	}
 	return nil
@@ -97,8 +104,20 @@ func (m Model) overlaySettings(frame string) string {
 		{"Density", m.density.String(), ""},
 		{"Status", statusName(m.myStatus), components.PresenceDot(p, m.myStatus)},
 		{"Group DMs", onOff(m.prefs.GroupDMs), ""},
+		{"Notifications", notifyLabel(m.prefs), ""},
 		{"Key hints", onOff(m.showHints), ""},
 	}
+
+	// Derive the label column from the labels themselves. It was hardcoded at
+	// 11, which silently wrapped the moment a longer row was added and broke the
+	// card's border.
+	labelW := 0
+	for _, r := range rows {
+		if n := lipgloss.Width(r.label); n > labelW {
+			labelW = n
+		}
+	}
+	labelW++ // one space before the value
 
 	var lines []string
 	for i, r := range rows {
@@ -108,7 +127,7 @@ func (m Model) overlaySettings(frame string) string {
 			bar = lipgloss.NewStyle().Foreground(p.Accent).Render("▌") + " "
 			labelColor = p.Fg
 		}
-		label := lipgloss.NewStyle().Foreground(labelColor).Width(11).Render(r.label)
+		label := lipgloss.NewStyle().Foreground(labelColor).Width(labelW).Render(r.label)
 		line := bar + label + val(r.value)
 		if r.extra != "" {
 			line += "  " + r.extra
@@ -206,4 +225,17 @@ func indexOfStr(s []string, v string) int {
 		}
 	}
 	return 0
+}
+
+// notifyLabel distinguishes "you turned this off" from "this machine has no
+// notification daemon", which otherwise look identical and send people hunting
+// for a setting that isn't the problem.
+func notifyLabel(p config.Prefs) string {
+	if !p.Notifications() {
+		return "Off"
+	}
+	if !notify.Available() {
+		return "Unavailable"
+	}
+	return "Mentions & DMs"
 }

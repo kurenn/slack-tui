@@ -22,7 +22,7 @@ Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 - **Threads, reactions, edits** — open threads, react with any emoji, edit and delete your messages
 - **Autocomplete** — `@` pops handles (mentions actually ping), `:` pops emoji
 - **Fuzzy everything** — command palette (`Ctrl-K`), workspace search (`s`), channel browser & join
-- **Lives in the background** — Socket Mode live unread (self-healing), terminal bell on mentions, unread count in the terminal title, `── new ──` divider at first unread
+- **Lives in the background** — Socket Mode live unread (self-healing), desktop notifications + terminal bell on mentions and DMs, unread count in the terminal title, `── new ──` divider at first unread
 - **Follows your desktop theme** on [Omarchy](https://omarchy.org) — re-theme and the TUI repaints with it; 5 built-in themes × 7 accents everywhere else
 - **Mock workspace built in** — run it with zero setup to try the feel
 
@@ -253,6 +253,18 @@ launch directly into one with `slack-tui --workspace <name>`.
 > from slack-tui. If you control the bot, filter on *its own* `bot_id` (or
 > `subtype == "bot_message"` / missing `user`) instead: a message with both
 > `user` and `bot_id` is a human talking through an API client.
+
+## Notifications
+
+Mentions, DMs and replies to your own threads raise a desktop notification —
+`notify-send` on Linux (so it goes through the Omarchy shell's notification
+service), `terminal-notifier` or `osascript` on macOS. Machines without a
+notification daemon simply don't get them; the terminal bell and the unread
+count in the window title still fire.
+
+Turn them off in settings (`,`) → *Notifications*. The setting reads
+"Unavailable" rather than "On" when the machine has no notifier, so a silent
+desktop isn't mistaken for a misconfiguration.
 
 ## Theming
 

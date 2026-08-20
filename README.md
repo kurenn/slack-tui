@@ -262,6 +262,12 @@ service), `terminal-notifier` or `osascript` on macOS. Machines without a
 notification daemon simply don't get them; the terminal bell and the unread
 count in the window title still fire.
 
+Without Socket Mode they arrive on the unread poll rather than instantly: a DM
+notifies as soon as its unread count grows, and a channel only when the new
+messages actually mention you (checked with one history fetch, for at most three
+channels per round — unread polling is rate-limit sensitive). With Socket Mode
+they're immediate.
+
 Turn them off in settings (`,`) → *Notifications*. The setting reads
 "Unavailable" rather than "On" when the machine has no notifier, so a silent
 desktop isn't mistaken for a misconfiguration.

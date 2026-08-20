@@ -673,3 +673,98 @@ func (m Model) displayName(userID string) string {
 	}
 	return ""
 }
+
+// ── alerts without Socket Mode ───────────────────────────────────────────────
+
+// mentionScanCap bounds how many channels one poll round will fetch history for
+// to look for a mention. Unread polling has already caused a rate-limit
+// incident once (v0.5.2), so this stays small: a round that grew more channels
+// than this alerts about the first few and lets the next round catch the rest.
+const mentionScanCap = 3
+
+// pollAlerts turns a round of polled unread counts into alerts.
+//
+// Every other alert path in this file hangs off a Socket Mode event, which needs
+// the xapp and xoxb tokens. Those cannot be issued by a loopback sign-in at all,
+// so most installs never run Socket Mode — and for them nothing ever rang the
+// bell or raised a notification, despite both being advertised.
+//
+// DMs alert on any increase: a direct message is addressed to you by
+// definition. Channels are noisier, so they only alert on an actual mention,
+// which costs a history fetch — issued only for channels whose count grew.
+func (m *Model) pollAlerts(counts map[string]int, seq int) []tea.Cmd {
+	// The first round after launch compares against counts from the initial
+	// load, which are frequently zero — alerting on those would greet the user
+	// with a notification per unread conversation on every start.
+	if !m.unreadPrimed {
+		m.unreadPrimed = true
+		return nil
+	}
+	var cmds []tea.Cmd
+	var scan []string
+	for id, n := range counts {
+		if id == m.activeID || m.readSeqOf[id] > seq {
+			continue
+		}
+		prev := m.meta[id].Unread
+		if n <= prev {
+			continue
+		}
+		conv, ok := m.ws.Conversation(id)
+		if !ok {
+			continue
+		}
+		if conv.Type == "dm" || conv.Type == "group" {
+			cmds = append(cmds, bellCmd, m.notifyCmd(conv.Name, "", plural(n-prev)))
+			continue
+		}
+		if len(scan) < mentionScanCap {
+			scan = append(scan, id)
+		}
+	}
+	for _, id := range scan {
+		cmds = append(cmds, m.mentionScanCmd(id, counts[id]-m.meta[id].Unread))
+	}
+	return cmds
+}
+
+// plural renders the notification body for n newly-arrived messages.
+func plural(n int) string {
+	if n == 1 {
+		return "1 new message"
+	}
+	return fmt.Sprintf("%d new messages", n)
+}
+
+// mentionScanMsg reports a mention found by scanning a channel's new messages.
+type mentionScanMsg struct {
+	convID string
+	author string
+	text   string
+	found  bool
+}
+
+// mentionScanCmd looks at the n messages that just arrived in a channel and
+// reports the most recent one that mentions the user. Only the new messages are
+// examined, so an older mention already seen is not re-announced.
+func (m Model) mentionScanCmd(convID string, n int) tea.Cmd {
+	src, me := m.src, m.ws.MeID
+	if n < 1 {
+		n = 1
+	}
+	return func() tea.Msg {
+		msgs, err := src.History(convID)
+		if err != nil || len(msgs) == 0 {
+			return mentionScanMsg{convID: convID}
+		}
+		if n < len(msgs) {
+			msgs = msgs[len(msgs)-n:]
+		}
+		for i := len(msgs) - 1; i >= 0; i-- {
+			if msgs[i].MentionsMe && msgs[i].UserID != me {
+				return mentionScanMsg{convID: convID, author: msgs[i].UserID, text: msgs[i].Text, found: true}
+			}
+		}
+		return mentionScanMsg{convID: convID}
+	}
+}

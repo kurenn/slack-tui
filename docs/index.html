@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>slack-tui — a keyboard-first Slack client for your terminal</title>
+<meta name="description" content="A keyboard-first, vim-modal Slack client that runs in your terminal. Like vim or lazygit, not another Electron window.">
+<meta property="og:title" content="slack-tui">
+<meta property="og:description" content="A keyboard-first, vim-modal Slack client for your terminal.">
+<meta property="og:image" content="https://kurenn.github.io/slack-tui/main.png">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='14'>▚</text></svg>">
+<style>
+  /* The app's own charcoal palette — the site should look like the tool. */
+  :root {
+    --bg:      #0d1117;
+    --fg:      #c9d1d9;
+    --dim:     #7a838f;
+    --dim2:    #4d5663;
+    --border:  #262d38;
+    --accent:  #56d4dd;
+    --green:   #7ee787;
+    --purple:  #c8a2ff;
+    --orange:  #f0a868;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 15px/1.65 ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    padding: 8vh 24px 12vh;
+  }
+  main { max-width: 62ch; margin: 0 auto; }
+
+  h1 { font-size: 1.55rem; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+  h1 .cursor {
+    color: var(--accent);
+    animation: blink 1.2s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { h1 .cursor { animation: none; } }
+
+  .tagline { color: var(--fg); margin: .35rem 0 0; }
+  .sub { color: var(--dim); margin: .2rem 0 0; }
+
+  /* The ASCII rule, borrowed in spirit from the terminal itself. */
+  .rule {
+    color: var(--dim2);
+    margin: 2.2rem 0;
+    overflow: hidden;
+    white-space: nowrap;
+    user-select: none;
+  }
+
+  h2 {
+    font-size: .8rem;
+    font-weight: 600;
+    text-transform: lowercase;
+    letter-spacing: .08em;
+    color: var(--dim);
+    margin: 0 0 .9rem;
+  }
+
+  ul { list-style: none; padding: 0; margin: 0; }
+  /* Hanging indent so a wrapped feature line stays under its text, not back
+     at the bullet. */
+  li { margin: .3rem 0; color: var(--fg); padding-left: 1.15em; text-indent: -1.15em; }
+  li::before { content: "· "; color: var(--accent); }
+  li b { font-weight: 600; color: var(--fg); }
+  li span { color: var(--dim); }
+
+  figure { margin: 0; }
+  figure img {
+    width: 100%; height: auto; display: block;
+    border: 1px solid var(--border); border-radius: 6px;
+  }
+  figcaption { color: var(--dim2); font-size: .8rem; margin-top: .5rem; }
+
+  pre {
+    background: #11161d;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: .85rem 1rem;
+    /* Wrap rather than scroll: the install line is meant to be copied, and a
+       command that runs off the edge is one people copy half of. */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    margin: 0 0 .7rem;
+    font-size: .875rem;
+    line-height: 1.6;
+  }
+  code { font: inherit; }
+  .c { color: var(--dim2); }      /* comment */
+  .g { color: var(--green); }     /* command */
+  .p { color: var(--purple); }
+  .o { color: var(--orange); }
+
+  .note { color: var(--dim); font-size: .875rem; margin: .1rem 0 0; }
+  .note + .note { margin-top: .9rem; }
+  .note a, p a, li a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; }
+  .note a:hover, p a:hover, li a:hover { border-bottom-color: var(--accent); }
+
+  table { border-collapse: collapse; width: 100%; font-size: .875rem; }
+  td { padding: .22rem 0; vertical-align: top; }
+  td:first-child { color: var(--accent); white-space: nowrap; padding-right: 1.5rem; width: 1%; }
+  td:last-child { color: var(--dim); }
+
+  nav { margin-top: .4rem; display: flex; flex-wrap: wrap; gap: 1.4rem; }
+  nav a {
+    color: var(--fg); text-decoration: none;
+    border-bottom: 1px solid var(--dim2);
+  }
+  nav a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+  footer { color: var(--dim2); font-size: .8rem; margin-top: 2.4rem; }
+  footer a { color: var(--dim); text-decoration: none; }
+  footer a:hover { color: var(--accent); }
+
+  section { margin-bottom: 2.6rem; }
+</style>
+</head>
+<body>
+<main>
+
+  <header>
+    <h1>slack-tui<span class="cursor">▏</span></h1>
+    <p class="tagline">A keyboard-first Slack client for your terminal.</p>
+    <p class="sub">Like <code>vim</code> or <code>lazygit</code> — not another Electron window.</p>
+  </header>
+
+  <div class="rule">▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁</div>
+
+  <section>
+    <figure>
+      <img src="demo.gif" width="760" height="428" alt="slack-tui in a terminal: a channel list, a message pane, and a thread view, navigated by keyboard.">
+      <figcaption>Three panes, no mouse. The whole client is keys.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <ul>
+      <li><b>Vim-modal</b> <span>— NORMAL/INSERT, <code>j/k</code>, <code>gg/G</code>, <code>/</code> to find, <code>dd</code> to delete</span></li>
+      <li><b>Threads, reactions, edits</b> <span>— everything you actually do in Slack</span></li>
+      <li><b>Fuzzy everything</b> <span>— command palette, workspace search, channel browser</span></li>
+      <li><b>Lives in the background</b> <span>— live unread, desktop notifications on mentions and DMs</span></li>
+      <li><b>Follows your desktop theme</b> <span>— on <a href="https://omarchy.org">Omarchy</a>, re-theme and the TUI repaints with it</span></li>
+      <li><b>Your own Slack app</b> <span>— no third party sees your messages</span></li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>install</h2>
+<pre><code><span class="c"># verifies checksums, no Go toolchain needed</span>
+<span class="g">curl</span> -fsSL https://raw.githubusercontent.com/kurenn/slack-tui/main/install.sh | sh</code></pre>
+<pre><code><span class="c"># or from source</span>
+<span class="g">go</span> install github.com/kurenn/slack-tui@latest</code></pre>
+    <p class="note">
+      Installs to <code>/usr/local/bin</code>, or <code>~/.local/bin</code> when that isn't
+      writable. Prebuilt binaries for Linux, macOS and Windows are on
+      <a href="https://github.com/kurenn/slack-tui/releases">the releases page</a>;
+      macOS also has <code>brew install kurenn/tap/slack-tui</code>.
+    </p>
+  </section>
+
+  <section>
+    <h2>connect</h2>
+<pre><code><span class="g">slack-tui</span> setup</code></pre>
+    <p class="note">
+      Two minutes, once. It copies a Slack app manifest to your clipboard, opens
+      the browser, asks for the Client ID, and signs you in. There is no client
+      secret — sign-in uses PKCE, and the token never leaves your machine.
+    </p>
+    <p class="note">
+      No Slack account handy? Run <code>slack-tui</code> with no setup at all and
+      you get a mock workspace to play with.
+    </p>
+  </section>
+
+  <section>
+    <h2>keys</h2>
+    <table>
+      <tr><td>j / k · gg / G</td><td>move · jump to top/bottom</td></tr>
+      <tr><td>Tab · h / l</td><td>switch panes</td></tr>
+      <tr><td>Enter · t</td><td>open thread</td></tr>
+      <tr><td>i · r</td><td>write · reply in thread</td></tr>
+      <tr><td>a · e · dd · y</td><td>react · edit · delete · yank</td></tr>
+      <tr><td>/ · n / N · s</td><td>find in channel · next/prev · search workspace</td></tr>
+      <tr><td>] · [</td><td>next · previous unread</td></tr>
+      <tr><td>Ctrl-K</td><td>command palette</td></tr>
+      <tr><td>, · ?</td><td>settings · help</td></tr>
+    </table>
+  </section>
+
+  <div class="rule">▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁</div>
+
+  <nav>
+    <a href="https://github.com/kurenn/slack-tui">GitHub</a>
+    <a href="https://github.com/kurenn/slack-tui/releases">Releases</a>
+    <a href="https://github.com/kurenn/slack-tui/blob/main/README.md">Docs</a>
+    <a href="https://github.com/kurenn/slack-tui/blob/main/docs/agent-setup.md">Set up with an agent</a>
+  </nav>
+
+  <footer>
+    MIT · built with <a href="https://github.com/charmbracelet/bubbletea">Bubble Tea</a> ·
+    by <a href="https://github.com/kurenn">kurenn</a>
+  </footer>
+
+</main>
+</body>
+</html>

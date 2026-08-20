@@ -15,11 +15,14 @@ builds:
     ignore:
       - goos: windows
         goarch: arm64
-    # SLACK_APP_CLIENT_ID stamps the published app's client ID so a plain install
-    # can sign in with nothing configured. It is NOT a secret — the shipped flow
-    # is PKCE, which is precisely the OAuth mode for clients that cannot keep
-    # one. Unset (forks, local `goreleaser release --snapshot`) it stays empty
-    # and those builds fall back to a user-supplied app in oauth.json.
+    # Public release binaries deliberately ship with NO client ID: slack-tui is
+    # not distributed through Slack, and an undistributed app installs only in
+    # the workspace that owns it, so a baked-in ID would fail for everyone else.
+    # Every user creates their own app via `slack-tui setup`.
+    #
+    # SLACK_APP_CLIENT_ID stays wired up for private builds — an org that
+    # creates one app for its own workspace can stamp it and hand teammates a
+    # binary that signs in with no setup at all.
     ldflags:
       - -s -w -X main.version={{.Version}} -X github.com/kurenn/slack-tui/internal/config.DefaultClientID={{ envOrDefault "SLACK_APP_CLIENT_ID" "" }}
 

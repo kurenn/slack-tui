@@ -64,7 +64,7 @@ func TestBootFastForwardThenAuth(t *testing.T) {
 func TestAuthGuestToIdentity(t *testing.T) {
 	m := sized()
 	m.phase = phaseAuth
-	m = Key(m, "4") // continue as guest
+	m = Key(m, "3") // continue as guest
 	if m.phase != phaseIdentity {
 		t.Errorf("guest auth → phase %q, want identity", m.phase)
 	}
@@ -76,7 +76,7 @@ func TestAuthGuestToIdentity(t *testing.T) {
 func TestTokenFlow(t *testing.T) {
 	m := sized()
 	m.phase = phaseAuth
-	m = Key(m, "3") // paste a token
+	m = Key(m, "2") // paste a token
 	if m.phase != phaseToken {
 		t.Fatalf("phase = %q, want token", m.phase)
 	}
@@ -381,5 +381,31 @@ func TestWizardKeepsColorStepsWithoutOmarchy(t *testing.T) {
 	}
 	if m.themeName == theme.OmarchyName {
 		t.Error("should not follow a desktop theme that isn't there")
+	}
+}
+
+// The auth menu is short; a key past the end must be ignored rather than
+// panicking on an out-of-range option.
+func TestAuthKeyBeyondMenuIsIgnored(t *testing.T) {
+	m := sized()
+	m.phase = phaseAuth
+	for _, k := range []string{"4", "7", "9"} {
+		m = Key(m, k)
+		if m.phase != phaseAuth {
+			t.Fatalf("key %q moved to %q, want to stay on auth", k, m.phase)
+		}
+	}
+}
+
+// No auth option may claim to authenticate without doing so — the removed SSO
+// entry animated a fake sign-in and landed in the mock workspace.
+func TestNoSimulatedAuthOptions(t *testing.T) {
+	for _, o := range authOpts {
+		if o.id == "sso" {
+			t.Error("the simulated SSO option is back")
+		}
+	}
+	if len(authOpts) != 3 {
+		t.Errorf("authOpts = %d entries, want 3", len(authOpts))
 	}
 }

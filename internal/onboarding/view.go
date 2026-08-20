@@ -268,7 +268,7 @@ func (m Model) hints() [][2]string {
 	case phaseBoot, phaseOAuth:
 		return [][2]string{{"any key", "skip"}}
 	case phaseAuth:
-		return [][2]string{{"j/k", "choose"}, {"1-4", "jump"}, {"↵", "authenticate"}}
+		return [][2]string{{"j/k", "choose"}, {"1-3", "jump"}, {"↵", "authenticate"}}
 	case phaseAppSetup:
 		return [][2]string{{"^y", "copy manifest"}, {"^o", "open slack"}, {"↵", "sign in"}, {"esc", "back"}}
 	case phaseToken, phaseIdentity:

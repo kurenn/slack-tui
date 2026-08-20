@@ -63,49 +63,58 @@ slack-tui          # no token? you get a mock workspace to play with
 ## Connect to Slack
 
 ```sh
-slack-tui login    # opens your browser, and that's the whole setup
-```
-
-No app to create, no credentials to copy, nothing to paste. Sign-in uses
-[PKCE](https://docs.slack.dev/authentication/using-pkce/), the OAuth mode built
-for clients that can't keep a secret, so slack-tui ships only a public client ID
-and the code exchange is proved with a one-time verifier generated on your
-machine. The browser redirect lands on loopback — `http://localhost:9899/callback`,
-or the next free port up to `9903` — so the token never leaves your laptop.
-Tokens are stored in `~/.config/slack-tui/tokens.json` (0600); env vars
-(`SLACK_USER_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_BOT_TOKEN`) override per-token.
-
-You can also pick **"Sign in with Slack"** in onboarding, or paste a user token
-(`xoxp-…`) directly.
-
-**Tokens from a browser sign-in expire.** Slack forces token rotation for a
-loopback redirect — it does this regardless of the app's token-rotation setting,
-so there's no opting out — and the access token lasts about 12 hours. slack-tui
-refreshes it for you: once within 30 minutes of expiry, at launch and again on
-its poll loop, so a session left running overnight keeps working. The refresh
-token is single-use and the replacement is written to disk before it's used, so
-an interrupted refresh costs you nothing worse than one `slack-tui login`.
-`slack-tui doctor` shows the time remaining. A hand-pasted `xoxp-…` token doesn't
-expire and is never refreshed.
-
-> Some workspaces require an admin to approve third-party apps. If sign-in comes
-> back denied, that's the wall you hit — ask an admin to approve slack-tui, or
-> use your own app (below).
-
-### Bring your own Slack app
-
-Not required if you're using a build with an app baked in, and the one reason
-you'd want to is **Socket Mode live unread** (below). One command does the whole
-thing:
-
-```sh
 slack-tui setup
 ```
 
-It puts the app manifest on your clipboard, opens api.slack.com/apps, asks for
-the Client ID once you've created the app, saves it, and signs you straight in.
-About two minutes, and there's no client secret anywhere in it — sign-in is
-PKCE, which never uses one.
+That's it. It copies the app manifest to your clipboard, opens
+api.slack.com/apps, waits while you paste it into your workspace, asks for the
+Client ID it gives you, and signs you in. Two minutes, once.
+
+Running `slack-tui` first works too — onboarding walks you through the same
+three steps without leaving the TUI.
+
+<details>
+<summary>Why you create an app at all</summary>
+
+slack-tui isn't distributed through Slack, and an undistributed Slack app can
+only be installed in the workspace that owns it. So there's no shared app to
+sign you in — each workspace needs its own. The upside is that the app is
+yours: it's not a third party you're trusting, and your messages never pass
+through anyone else's infrastructure.
+
+There's **no client secret** anywhere in this. Sign-in uses
+[PKCE](https://docs.slack.dev/authentication/using-pkce/), where the exchange is
+proved with a one-time verifier generated on your machine, so the only thing
+stored is a public client ID. Slack in fact *requires* PKCE here — a loopback
+redirect is a "non-web URI" and it refuses the sign-in without it.
+
+The browser redirect lands on `http://localhost:9899/callback` (or the next free
+port up to `9903`), so the token never leaves your machine. Tokens live in
+`~/.config/slack-tui/tokens.json` (0600); `SLACK_USER_TOKEN`, `SLACK_APP_TOKEN`
+and `SLACK_BOT_TOKEN` override per-token.
+
+</details>
+
+<details>
+<summary>Tokens expire after ~12 hours — slack-tui refreshes them</summary>
+
+Slack forces token rotation for a loopback redirect, regardless of the app's
+token-rotation setting, so there's no opting out. slack-tui renews the token
+within 30 minutes of expiry, at launch and again on its poll loop, so a session
+left running overnight keeps working. The refresh token is single-use and its
+replacement is written to disk before being used, so an interrupted refresh
+costs nothing worse than one `slack-tui login`. `slack-tui doctor` shows the
+time remaining. A hand-pasted `xoxp-…` token doesn't expire and is never
+refreshed.
+
+</details>
+
+> **Using an agent?** Point Claude Code (or similar) at
+> [`docs/agent-setup.md`](docs/agent-setup.md) and it will do the parts that can
+> be automated, stopping at the two clicks that need you.
+
+> Some workspaces require an admin to approve third-party apps. If sign-in comes
+> back denied, that's the wall you hit — ask your admin to approve it.
 
 ### Socket Mode (live unread)
 

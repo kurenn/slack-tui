@@ -21,11 +21,14 @@ type authOpt struct {
 	primary                    bool
 }
 
+// The old "Single sign-on (SSO)" entry was a typewriter animation that
+// authenticated nothing and dropped the user in the mock workspace. Harmless in
+// a demo, misleading in a tool strangers install — anyone at an SSO shop would
+// reach for it first.
 var authOpts = []authOpt{
 	{id: "slack", key: "1", mark: "#", label: "Sign in with Slack", hint: "oauth", primary: true},
-	{id: "sso", key: "2", mark: "⊞", label: "Single sign-on (SSO)", hint: "saml"},
-	{id: "token", key: "3", mark: "⊟", label: "Paste an auth token", hint: "xoxp-…"},
-	{id: "guest", key: "4", mark: "◇", label: "Continue as guest", hint: "demo"},
+	{id: "token", key: "2", mark: "⊟", label: "Paste an auth token", hint: "xoxp-…"},
+	{id: "guest", key: "3", mark: "◇", label: "Continue as guest", hint: "demo"},
 }
 
 var themeOpts = []struct{ val, name string }{
@@ -118,8 +121,11 @@ func (m Model) authKey(k string) (Model, tea.Cmd) {
 		m.authSel = clamp(m.authSel-1, 0, len(authOpts)-1)
 	case k == "enter":
 		return m.chooseAuth(authOpts[m.authSel])
-	case len(k) == 1 && k >= "1" && k <= "4":
+	case len(k) == 1 && k >= "1" && k <= "9":
 		n := int(k[0] - '1')
+		if n >= len(authOpts) {
+			return m, nil
+		}
 		m.authSel = n
 		return m.chooseAuth(authOpts[n])
 	}
@@ -147,11 +153,8 @@ func (m Model) chooseAuth(opt authOpt) (Model, tea.Cmd) {
 			return m, m.clientID.Focus()
 		}
 		return m.startOAuth(creds)
-	default: // sso (simulated)
-		m.phase = phaseOAuth
-		m.oauth = newTypewriter(oauthLines(opt.id))
-		return m, tick(m.speedMS())
 	}
+	return m, nil
 }
 
 // startOAuth switches to the waiting screen and kicks off the browser flow.

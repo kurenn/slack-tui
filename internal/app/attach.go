@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -19,6 +20,35 @@ type uploadMsg struct {
 	paths   []string
 	comment string
 	err     error
+}
+
+// looksBinary reports whether a paste is raw binary (an image off the clipboard,
+// a file's bytes) rather than text worth composing. Bracketed paste hands us the
+// bytes verbatim, so a PNG dropped in the composer becomes thousands of runes of
+// mojibake that the textarea happily keeps — and drafts persist across restarts.
+// Binary runs ~30% control runes and is full of NULs; text has neither.
+func looksBinary(runes []rune) bool {
+	ctrl := 0
+	for _, r := range runes {
+		switch {
+		case r == 0:
+			return true
+		case r == '\n' || r == '\t' || r == '\r' || r == '\x1b': // ESC is ANSI color, not binary evidence
+		case unicode.IsControl(r):
+			ctrl++
+		}
+	}
+	return ctrl*20 > len(runes) // >5%
+}
+
+// dropBinaryDrafts removes drafts poisoned by pre-guard binary pastes: the
+// composer restored them from state.json on every launch, with no way out.
+func dropBinaryDrafts(drafts map[string]string) {
+	for id, d := range drafts {
+		if looksBinary([]rune(d)) {
+			delete(drafts, id)
+		}
+	}
 }
 
 // parseDroppedPaths extracts existing local file paths from text a terminal inserted

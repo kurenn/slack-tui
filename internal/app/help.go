@@ -25,6 +25,7 @@ var helpRows = []helpRow{
 	{"a", "react to message"},
 	{"e", "edit your message"},
 	{"dd", "delete your message"},
+	{"cc", "clear the composer"},
 	{"o", "open message links"},
 	{"A", "attach file · or drag-drop"},
 	{"/ · n / N", "find in channel · next/prev"},

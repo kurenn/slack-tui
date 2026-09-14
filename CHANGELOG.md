@@ -3,6 +3,19 @@
 slack-tui follows semver-ish tags; every release ships binaries for
 macOS/Linux/Windows plus a Homebrew formula via goreleaser.
 
+## Unreleased
+
+- **A pasted image could brick the composer for good** — bracketed paste hands
+  the bytes through as runes, the textarea accepted them, and drafts persist to
+  `~/.config/slack-tui/state.json` on quit, so ~5,600 runes of mangled PNG
+  reloaded into the composer on every launch with no in-app way to clear it.
+  Binary pastes (any NUL, or >5% control runes) are now rejected with an error
+  flash instead of being typed anywhere — composer, thread composer, and every
+  overlay prompt (find, palette, attach, status message, channel picker).
+  Drafts already poisoned in `state.json` are dropped at startup, healing
+  anyone already stuck. And `cc`, mirroring `dd`, clears the composer and
+  forgets its saved draft — the escape hatch that was missing.
+
 ## v0.6.1
 
 - **Notifications actually fire** — every alert path, the terminal bell included,

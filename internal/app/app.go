@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -141,6 +142,7 @@ type Model struct {
 	editingID string // message being edited in the composer ("" = composing new)
 	prevDraft string // draft parked while editing
 	dPending  time.Time
+	cPending  time.Time
 	suggest   suggestState // composer autocomplete popup
 
 	picker      pickerState
@@ -242,6 +244,10 @@ func New() Model {
 		if st.Drafts != nil {
 			m.drafts = st.Drafts
 		}
+		// Drafts saved before the binary-paste guard existed may still hold raw
+		// image bytes; strip those now so the composer restore below reads a
+		// clean map.
+		dropBinaryDrafts(m.drafts)
 		m.recent = st.Recent
 		if st.Hidden != nil {
 			m.hidden = st.Hidden
@@ -891,6 +897,18 @@ func (m *Model) enterInsert(which string) tea.Cmd {
 	return m.draft.Focus()
 }
 
+// clearDraft empties the focused composer and forgets its saved draft.
+func (m *Model) clearDraft() {
+	if m.focus == focusThread {
+		m.threadDraft.SetValue("")
+	} else {
+		m.draft.SetValue("")
+		delete(m.drafts, m.activeID)
+	}
+	m.clearSuggest()
+	m.syncComposerSizes()
+}
+
 func (m *Model) leaveInsert() {
 	m.insert = false
 	m.clearSuggest()
@@ -1262,6 +1280,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.selActive {
 			m.selActive, m.selecting = false, false
 		}
+		// Binary paste (raw image bytes off the clipboard) is rejected before
+		// every other dispatch below, including the overlays that return early
+		// — statusTextKey in particular ships its value straight to the Slack
+		// API, so it must never see mojibake either.
+		if msg.Paste && looksBinary(msg.Runes) {
+			return m, m.flash(errors.New("that paste is binary, not text — ignored"))
+		}
 		// Ctrl-K toggles the palette from any mode (Cmd never reaches a terminal).
 		if msg.String() == "ctrl+k" {
 			if m.paletteOpen {
@@ -1378,6 +1403,21 @@ func (m Model) insertKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
+
+	// Any non-g key cancels a pending gg (same for dd, cc). This must run
+	// before the switch below: case "g", "d" and "c" all return early from
+	// it, so a tail reset would never fire for those keys — letting a
+	// mismatched pair like "c d c" trigger "cc" (a silent draft wipe).
+	if k != "g" {
+		m.gPending = time.Time{}
+	}
+	if k != "d" {
+		m.dPending = time.Time{}
+	}
+	if k != "c" {
+		m.cPending = time.Time{}
+	}
+
 	order := m.focusOrder()
 	idx := indexOf(order, m.focus)
 
@@ -1474,6 +1514,15 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if msg, ok := m.selectedMsg(); ok && msg.UserID == m.ws.MeID && !isPending(msg.ID) {
 			return m, m.startEdit(msg)
 		}
+
+	case "c": // cc clears the composer (the only way out of a draft you can't hand-delete)
+		if !m.cPending.IsZero() && time.Since(m.cPending) < 500*time.Millisecond {
+			m.cPending = time.Time{}
+			m.clearDraft()
+		} else {
+			m.cPending = time.Now()
+		}
+		return m, nil
 
 	case "d": // dd deletes your own selected message (with confirm)
 		if !m.dPending.IsZero() && time.Since(m.dPending) < 500*time.Millisecond {
@@ -1574,13 +1623,6 @@ func (m Model) normalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.toggleHide(target)
 	}
 
-	// any non-g key cancels a pending gg (same for dd)
-	if k != "g" {
-		m.gPending = time.Time{}
-	}
-	if k != "d" {
-		m.dPending = time.Time{}
-	}
 	return m, nil
 }
 

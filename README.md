@@ -295,6 +295,7 @@ Omarchy, the built-in themes are the only option and nothing changes.
 | `Alt-Enter` | newline in the composer |
 | `@…` `:…` | autocomplete mentions / emoji (`Tab` accepts) |
 | `a` · `e` · `dd` · `y` | react · edit · delete · yank |
+| `cc` | clear the composer |
 | `o` | open message links/files |
 | `/` `n/N` · `s` | find in channel · search workspace |
 | `T` | threads inbox (threads you're in) |
